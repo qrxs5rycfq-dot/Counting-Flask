@@ -6,14 +6,15 @@ def get_conn():
     return psycopg2.connect(dsn=os.getenv("DATABASE_URL"))
 
 def get_grafik_data(dari, ke):
+    """Query acc_transaction for the date range — same source as zone pages."""
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     query = """
-        SELECT dept_name, first_in_time, last_out_time, reader_name_in, reader_name_out
-        FROM acc_firstin_lastout
-        WHERE update_time BETWEEN %s AND %s
-        ORDER BY first_in_time
+        SELECT pin, name, dept_name, dev_alias, event_point_name, event_time
+        FROM acc_transaction
+        WHERE event_time BETWEEN %s AND %s
+        ORDER BY event_time ASC
     """
     cur.execute(query, (dari, ke))
     result = cur.fetchall()
