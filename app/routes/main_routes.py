@@ -481,75 +481,161 @@ def register_routes(app):
             "rows": result
         })
 
-    def _aggregate_grafik(dari, ke, mode):
-        """Aggregate entry/exit/current data per period, department, and zone (POS 1/POS 2)."""
-        try:
-            records = get_grafik_data(dari, ke)
-        except Exception as e:
-            logger.error(f"Gagal mengambil data grafik: {e}")
-            return {
-                "labels": [],
-                "pos1_in": [], "pos1_out": [], "pos1_cur": [],
-                "pos2_in": [], "pos2_out": [], "pos2_cur": [],
-                "departments": []
-            }
+    def _process_zone_events(events, in_devices, out_devices):
+        """
+        Synchronous replica of EventProcessor state-machine logic for one zone.
+        Returns a list of logical in/out events after per-person deduplication.
+        """
+        in_devs = {d.strip().upper() for d in in_devices}
+        out_devs = {d.strip().upper() for d in out_devices}
+        reader_in = {d for d in in_devs if "-READER" in d}
+        reader_out = {d for d in out_devs if "-READER" in d}
 
-        # --- per-period totals ---
-        period_agg = {}
-        # --- per-department totals (across all periods) ---
-        dept_agg = {}
+        def get_type(dev_name):
+            dev_upper = dev_name.strip().upper()
+            if dev_upper in {d.replace("-READER", "") for d in in_devs}:
+                return "in"
+            if dev_upper in {d.replace("-READER", "") for d in out_devs}:
+                return "out"
+            return None
 
-        for record in records:
-            first_in = record.get("first_in_time")
-            last_out = record.get("last_out_time")
-            ref_time = first_in or last_out
-            if not ref_time:
+        def ts_from_val(val):
+            try:
+                if isinstance(val, datetime):
+                    return int(val.timestamp())
+                return int(datetime.strptime(str(val).strip(), "%Y-%m-%d %H:%M:%S").timestamp())
+            except (ValueError, TypeError, OSError):
+                return None
+
+        # Step 1: collect events per person (same as EventProcessor)
+        per_person = {}
+        for e in events:
+            pin = (e.get("pin") or "").strip()
+            name = (e.get("name") or "").strip()
+            dept = (e.get("dept_name") or "").strip() or "UNKNOWN"
+
+            dev_alias = str(e.get("dev_alias") or "").strip().upper()
+            event_point_name = str(e.get("event_point_name") or "").strip().upper()
+
+            dev = dev_alias
+            for reader_dev in (reader_in | reader_out):
+                base_name = reader_dev.replace("-READER", "").strip().upper()
+                if event_point_name == base_name:
+                    dev = event_point_name
+                    break
+
+            time_raw = e.get("event_time")
+            ts = ts_from_val(time_raw)
+            if not pin or not dev or ts is None:
                 continue
 
-            dept = record.get("dept_name") or "UNKNOWN"
+            ev_type = get_type(dev)
+            if not ev_type:
+                continue
 
+            person = per_person.setdefault(pin, {"dept": dept, "name": name, "events": []})
+            person["events"].append({"type": ev_type, "ts": ts, "time": time_raw})
+
+        # Step 2: state-machine per person (same logic as EventProcessor)
+        logical_events = []
+        for pin, person in per_person.items():
+            events_sorted = sorted(person["events"], key=lambda x: x["ts"])
+            status = "outside"
+
+            for ev in events_sorted:
+                if ev["type"] == "in" and status == "outside":
+                    status = "inside"
+                    logical_events.append({
+                        "dept": person["dept"],
+                        "action": "in",
+                        "time": ev["time"],
+                    })
+                elif ev["type"] == "out" and status == "inside":
+                    status = "outside"
+                    logical_events.append({
+                        "dept": person["dept"],
+                        "action": "out",
+                        "time": ev["time"],
+                    })
+
+        return logical_events
+
+    def _aggregate_grafik(dari, ke, mode):
+        """
+        Aggregate entry/exit/current data per period, department, and zone
+        using the same EventProcessor state-machine logic as zone pages.
+        """
+        empty = {
+            "labels": [],
+            "pos1_in": [], "pos1_out": [], "pos1_cur": [],
+            "pos2_in": [], "pos2_out": [], "pos2_cur": [],
+            "departments": []
+        }
+        try:
+            events = get_grafik_data(dari, ke)
+        except Exception as e:
+            logger.error(f"Gagal mengambil data grafik: {e}")
+            return empty
+
+        if not events:
+            return empty
+
+        # Device configs (same env vars as tracker_worker)
+        in_hijau = [d.strip() for d in os.getenv("IN_DEVICES_HIJAU", "").split(",") if d.strip()]
+        out_hijau = [d.strip() for d in os.getenv("OUT_DEVICES_HIJAU", "").split(",") if d.strip()]
+        in_merah = [d.strip() for d in os.getenv("IN_DEVICES_MERAH", "").split(",") if d.strip()]
+        out_merah = [d.strip() for d in os.getenv("OUT_DEVICES_MERAH", "").split(",") if d.strip()]
+
+        # Process each zone through the state machine
+        pos1_events = _process_zone_events(events, in_hijau, out_hijau)
+        pos2_events = _process_zone_events(events, in_merah, out_merah)
+
+        def get_period_label(time_val):
+            try:
+                if isinstance(time_val, datetime):
+                    dt = time_val
+                else:
+                    dt = datetime.strptime(str(time_val).strip(), "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                return "UNKNOWN"
             if mode == "week":
-                iso = ref_time.isocalendar()
-                label = f"{iso[0]}-W{iso[1]:02d}"
+                iso = dt.isocalendar()
+                return f"{iso[0]}-W{iso[1]:02d}"
             elif mode == "month":
-                label = ref_time.strftime("%Y-%m")
+                return dt.strftime("%Y-%m")
             else:
-                label = ref_time.strftime("%Y-%m-%d")
+                return dt.strftime("%Y-%m-%d")
+
+        period_agg = {}
+        dept_agg = {}
+
+        def add_event(zone_prefix, ev):
+            label = get_period_label(ev["time"])
+            dept = ev["dept"]
+            action = ev["action"]
+            key = f"{zone_prefix}_{action}"
 
             if label not in period_agg:
                 period_agg[label] = {
-                    "pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
-                    "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0,
+                    "pos1_in": 0, "pos1_out": 0,
+                    "pos2_in": 0, "pos2_out": 0,
                 }
+            period_agg[label][key] += 1
 
             if dept not in dept_agg:
                 dept_agg[dept] = {
-                    "pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
-                    "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0,
+                    "pos1_in": 0, "pos1_out": 0,
+                    "pos2_in": 0, "pos2_out": 0,
                 }
+            dept_agg[dept][key] += 1
 
-            device_in = record.get("reader_name_in", "")
-            device_out = record.get("reader_name_out", "")
+        for ev in pos1_events:
+            add_event("pos1", ev)
+        for ev in pos2_events:
+            add_event("pos2", ev)
 
-            pos1_in, pos2_in = get_zona_from_device(device_in, "IN_DEVICES_HIJAU", "IN_DEVICES_MERAH")
-            pos1_out, pos2_out = get_zona_from_device(device_out, "OUT_DEVICES_HIJAU", "OUT_DEVICES_MERAH")
-
-            if pos1_in:
-                period_agg[label]["pos1_in"] += 1
-                dept_agg[dept]["pos1_in"] += 1
-            if pos2_in:
-                period_agg[label]["pos2_in"] += 1
-                dept_agg[dept]["pos2_in"] += 1
-            if pos1_out:
-                period_agg[label]["pos1_out"] += 1
-                dept_agg[dept]["pos1_out"] += 1
-            if pos2_out:
-                period_agg[label]["pos2_out"] += 1
-                dept_agg[dept]["pos2_out"] += 1
-
-        # current (di dalam) = in - out, consistent with zone pages
-        for label in period_agg:
-            p = period_agg[label]
+        # current (di dalam) = in - out, same as SummaryBuilder
+        for p in period_agg.values():
             p["pos1_cur"] = max(p["pos1_in"] - p["pos1_out"], 0)
             p["pos2_cur"] = max(p["pos2_in"] - p["pos2_out"], 0)
 
@@ -558,12 +644,12 @@ def register_routes(app):
         departments = []
         for dept in sorted(dept_agg.keys()):
             d = dept_agg[dept]
-            d["pos1_cur"] = max(d["pos1_in"] - d["pos1_out"], 0)
-            d["pos2_cur"] = max(d["pos2_in"] - d["pos2_out"], 0)
             departments.append({
                 "dept": dept,
-                "pos1_in": d["pos1_in"], "pos1_out": d["pos1_out"], "pos1_cur": d["pos1_cur"],
-                "pos2_in": d["pos2_in"], "pos2_out": d["pos2_out"], "pos2_cur": d["pos2_cur"],
+                "pos1_in": d["pos1_in"], "pos1_out": d["pos1_out"],
+                "pos1_cur": max(d["pos1_in"] - d["pos1_out"], 0),
+                "pos2_in": d["pos2_in"], "pos2_out": d["pos2_out"],
+                "pos2_cur": max(d["pos2_in"] - d["pos2_out"], 0),
             })
 
         return {
