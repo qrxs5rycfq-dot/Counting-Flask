@@ -19,12 +19,13 @@ from werkzeug.utils import secure_filename
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
-from openpyxl.styles import Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Side, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import BarChart, Reference
 
 from app.utils.helpers import get_departments, get_zone_data, allowed_file
 from blacklist.blacklist_tracker import BlacklistTracker
-from models.db import get_transaksi_filtered
+from models.db import get_transaksi_filtered, get_grafik_data
 
 # ─── Logging Setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -428,6 +429,11 @@ def register_routes(app):
     def transaksi():
         return render_template("transaksi/index.html", title=transaksi_title)
 
+    @app.route("/grafik")
+    def grafik():
+        grafik_title = os.getenv("GRAFIK_TITLE", "Grafik Keluar Masuk Per Zona")
+        return render_template("grafik/index.html", title=grafik_title)
+
     # ─── API Zone Data ─────────────────
     @app.route("/api/data")
     def api_data():
@@ -474,6 +480,172 @@ def register_routes(app):
             "page": page,
             "rows": result
         })
+
+    def _aggregate_grafik(dari, ke, mode):
+        """Aggregate entry/exit data per period and zone."""
+        records = get_grafik_data(dari, ke)
+        aggregated = {}
+
+        for record in records:
+            first_in = record.get("first_in_time")
+            last_out = record.get("last_out_time")
+            ref_time = first_in or last_out
+            if not ref_time:
+                continue
+
+            if mode == "week":
+                iso = ref_time.isocalendar()
+                label = f"{iso[0]}-W{iso[1]:02d}"
+            elif mode == "month":
+                label = ref_time.strftime("%Y-%m")
+            else:
+                label = ref_time.strftime("%Y-%m-%d")
+
+            if label not in aggregated:
+                aggregated[label] = {"hijau_in": 0, "hijau_out": 0, "merah_in": 0, "merah_out": 0}
+
+            device_in = record.get("reader_name_in", "")
+            device_out = record.get("reader_name_out", "")
+
+            hijau_in, merah_in = get_zona_from_device(device_in, "IN_DEVICES_HIJAU", "IN_DEVICES_MERAH")
+            hijau_out, merah_out = get_zona_from_device(device_out, "OUT_DEVICES_HIJAU", "OUT_DEVICES_MERAH")
+
+            if hijau_in:
+                aggregated[label]["hijau_in"] += 1
+            if merah_in:
+                aggregated[label]["merah_in"] += 1
+            if hijau_out:
+                aggregated[label]["hijau_out"] += 1
+            if merah_out:
+                aggregated[label]["merah_out"] += 1
+
+        sorted_labels = sorted(aggregated.keys())
+        return {
+            "labels": sorted_labels,
+            "hijau_in": [aggregated[l]["hijau_in"] for l in sorted_labels],
+            "hijau_out": [aggregated[l]["hijau_out"] for l in sorted_labels],
+            "merah_in": [aggregated[l]["merah_in"] for l in sorted_labels],
+            "merah_out": [aggregated[l]["merah_out"] for l in sorted_labels],
+        }
+
+    @app.route("/api/grafik")
+    def api_grafik():
+        dari = request.args.get("dari", "")
+        ke = request.args.get("ke", "")
+        mode = request.args.get("mode", "day")
+
+        if not dari or not ke:
+            now = datetime.now()
+            dari = now.strftime("%Y-%m-%dT00:00:00")
+            ke = now.strftime("%Y-%m-%dT23:59:59")
+
+        return jsonify(_aggregate_grafik(dari, ke, mode))
+
+    @app.route("/export_grafik")
+    def export_grafik():
+        dari = request.args.get("dari", "")
+        ke = request.args.get("ke", "")
+        mode = request.args.get("mode", "day")
+
+        if not dari or not ke:
+            return {"error": "Parameter 'dari' dan 'ke' harus diisi."}, 400
+
+        data = _aggregate_grafik(dari, ke, mode)
+
+        if not data["labels"]:
+            return {"error": "Data tidak ditemukan dalam rentang waktu tersebut."}, 404
+
+        mode_labels = {"day": "Per Hari", "week": "Per Minggu", "month": "Per Bulan"}
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Grafik Data"
+
+        # Title row
+        ws.merge_cells("A1:E1")
+        ws["A1"] = f"Grafik Keluar Masuk Per Zona — {mode_labels.get(mode, mode)}"
+        ws["A1"].font = Font(bold=True, size=14)
+        ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+        ws.merge_cells("A2:E2")
+        ws["A2"] = f"Periode: {dari} s/d {ke}"
+        ws["A2"].alignment = Alignment(horizontal="center")
+
+        # Header row
+        header_row = 4
+        headers = ["Periode", "Hijau Masuk", "Hijau Keluar", "Merah Masuk", "Merah Keluar"]
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        align_center = Alignment(horizontal="center", vertical="center")
+        border = Border(
+            left=Side(style="thin"), right=Side(style="thin"),
+            top=Side(style="thin"), bottom=Side(style="thin")
+        )
+
+        for col_idx, h in enumerate(headers, 1):
+            cell = ws.cell(row=header_row, column=col_idx, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = align_center
+            cell.border = border
+
+        # Data rows
+        for i, label in enumerate(data["labels"]):
+            row_num = header_row + 1 + i
+            values = [label, data["hijau_in"][i], data["hijau_out"][i],
+                      data["merah_in"][i], data["merah_out"][i]]
+            for col_idx, val in enumerate(values, 1):
+                cell = ws.cell(row=row_num, column=col_idx, value=val)
+                cell.alignment = align_center
+                cell.border = border
+
+        last_data_row = header_row + len(data["labels"])
+
+        # Auto-adjust column widths
+        for col_idx in range(1, 6):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 18
+
+        # Create bar chart
+        chart = BarChart()
+        chart.type = "col"
+        chart.grouping = "clustered"
+        chart.title = f"Grafik Keluar Masuk — {mode_labels.get(mode, mode)}"
+        chart.y_axis.title = "Jumlah Orang"
+        chart.x_axis.title = "Periode"
+        chart.width = 28
+        chart.height = 14
+
+        chart_data = Reference(ws, min_col=2, min_row=header_row, max_col=5, max_row=last_data_row)
+        cats = Reference(ws, min_col=1, min_row=header_row + 1, max_row=last_data_row)
+        chart.add_data(chart_data, titles_from_data=True)
+        chart.set_categories(cats)
+
+        # Set series colors
+        colors = ["28A745", "90EE90", "DC3545", "FF6B6B"]
+        for idx, color in enumerate(colors):
+            if idx < len(chart.series):
+                chart.series[idx].graphicalProperties.solidFill = color
+
+        chart_anchor = f"A{last_data_row + 2}"
+        ws.add_chart(chart, chart_anchor)
+
+        logger.info(f"Export grafik oleh {request.remote_addr}: {dari} - {ke}, mode={mode}, {len(data['labels'])} periode")
+
+        virtual_file = io.BytesIO()
+        try:
+            wb.save(virtual_file)
+        except Exception as e:
+            logger.error(f"Gagal menyimpan file Excel grafik: {e}")
+            return {"error": "Gagal menyimpan file."}, 500
+
+        virtual_file.seek(0)
+        file_name = f"grafik_{mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(
+            virtual_file,
+            as_attachment=True,
+            download_name=file_name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     @app.route("/search_person")
     def search_person():

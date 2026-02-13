@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap5/bootstrap.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='flatpickr/flatpickr.min.css') }}">
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background-color: #f8f9fa;
+    }
+
+    .navbar-toggler { border: none; display: block !important; }
+    .navbar-toggler:focus { box-shadow: none; }
+    .navbar-collapse { display: none; }
+    .navbar-collapse.show { display: block !important; }
+
+    .card {
+      border: none;
+      border-radius: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    }
+
+    .form-label { font-weight: 500; }
+
+    .btn {
+      min-width: 120px;
+      transition: all 0.3s ease-in-out;
+    }
+    .btn:hover { transform: scale(1.05); }
+
+    .fade-in {
+      animation: fadeIn 0.6s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    #splash {
+      position: fixed;
+      background: white;
+      z-index: 9999;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      transition: opacity 0.6s ease;
+    }
+
+    #logo {
+      max-width: 120px;
+      margin-bottom: 12px;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 5px solid rgba(0, 123, 255, 0.2);
+      border-top-color: #007bff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #loading-spinner .overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background-color: rgba(255, 255, 255, 0.6); z-index: 9998;
+    }
+
+    #loading-spinner .spinner-wrapper {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%); z-index: 9999; text-align: center;
+    }
+
+    .custom-spinner {
+      border: 5px solid #e0e0e0;
+      border-top: 5px solid #0d6efd;
+      border-radius: 50%;
+      width: 50px; height: 50px;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto;
+    }
+
+    .loading-text {
+      margin-top: 12px; font-weight: 600; color: #333; font-size: 16px;
+    }
+
+    .chart-container {
+      position: relative;
+      width: 100%;
+      max-height: 500px;
+    }
+
+    .summary-cards .card-body {
+      padding: 1rem;
+    }
+
+    .summary-cards .card {
+      border-radius: 0.75rem;
+    }
+
+    .watermark {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex; align-items: center; gap: 10px;
+      opacity: 0.2; font-size: 22px; color: #000;
+      font-weight: 700; z-index: -1; pointer-events: none;
+    }
+
+    .watermark img {
+      height: 700px; max-width: 90vw; opacity: 0.5;
+    }
+
+    @media (max-width: 768px) {
+      .watermark img { height: 40vh; }
+    }
+
+    .table th { background-color: #f1f1f1; }
+    .table-striped tbody tr:nth-of-type(odd) { background-color: #f9f9f9; }
+  </style>
+</head>
+<body class="d-flex flex-column">
+
+<!-- Navbar -->
+<nav class="navbar navbar-light bg-white shadow-sm">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">
+      <img src="{{ url_for('static', filename='images/logo-ip3.png') }}" alt="Logo PLN" style="height: 40px;">
+    </a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+  </div>
+  <div class="collapse navbar-collapse justify-content-center text-center px-3 pb-2" id="mainNavbar">
+    <ul class="navbar-nav d-flex flex-column align-items-center w-100">
+      <li class="nav-item w-100"><a class="nav-link" href="/transaksi">TRANSAKSI</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/">ZONA HIJAU</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/merah">ZONA MERAH</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/all">SEMUA ZONA</a></li>
+      <li class="nav-item w-100"><a class="nav-link active" href="/grafik">GRAFIK</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/register">REGISTRASI PERSONAL</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/register_visitor">REGISTRASI VISITOR</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Splash -->
+<div id="splash">
+  <img src="{{ url_for('static', filename='images/app.ico') }}" id="logo" alt="Logo">
+  <div class="spinner"></div>
+  <p class="text-muted mt-3">Memuat halaman...</p>
+</div>
+
+<div id="loading-spinner" style="display:none;">
+  <div class="overlay"></div>
+  <div class="spinner-wrapper">
+    <div class="custom-spinner"></div>
+    <div class="loading-text">Mengunduh data...</div>
+  </div>
+</div>
+
+<!-- Main Content -->
+<div class="container-fluid flex-fill py-4 fade-in" style="display: none;" id="main-content">
+  <div class="row justify-content-center">
+    <div class="col-12 col-lg-11">
+      <div class="card">
+        <div class="card-body p-4">
+          <h3 class="mb-4 text-center fw-bold">{{ title }}</h3>
+
+          <!-- Filter Form -->
+          <form id="filter-form" class="row g-3 align-items-end mb-4">
+            <div class="col-md-3">
+              <label class="form-label">Dari</label>
+              <input type="text" id="dari" name="dari" class="form-control">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Sampai</label>
+              <input type="text" id="ke" name="ke" class="form-control">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Tampilan</label>
+              <select name="mode" id="mode" class="form-select">
+                <option value="day">Per Hari</option>
+                <option value="week">Per Minggu</option>
+                <option value="month">Per Bulan</option>
+              </select>
+            </div>
+            <div class="col-md-3 text-end">
+              <button type="submit" class="btn btn-primary">📊 Tampilkan</button>
+              <a href="#" id="btn-export" class="btn btn-success ms-2">⬇️ Export Excel</a>
+            </div>
+          </form>
+
+          <!-- Summary Cards -->
+          <div class="row summary-cards mb-4" id="summary-cards" style="display:none;">
+            <div class="col-md-3 mb-2">
+              <div class="card bg-success text-white text-center">
+                <div class="card-body">
+                  <h6>ZONA HIJAU - MASUK</h6>
+                  <h3 class="fw-bold" id="sum-hijau-in">0</h3>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-3 mb-2">
+              <div class="card bg-secondary text-white text-center">
+                <div class="card-body">
+                  <h6>ZONA HIJAU - KELUAR</h6>
+                  <h3 class="fw-bold" id="sum-hijau-out">0</h3>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-3 mb-2">
+              <div class="card bg-danger text-white text-center">
+                <div class="card-body">
+                  <h6>ZONA MERAH - MASUK</h6>
+                  <h3 class="fw-bold" id="sum-merah-in">0</h3>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-3 mb-2">
+              <div class="card bg-warning text-dark text-center">
+                <div class="card-body">
+                  <h6>ZONA MERAH - KELUAR</h6>
+                  <h3 class="fw-bold" id="sum-merah-out">0</h3>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart -->
+          <div class="chart-container mb-4">
+            <canvas id="grafikChart"></canvas>
+          </div>
+
+          <!-- Data Table -->
+          <div class="table-responsive">
+            <table class="table table-bordered table-striped table-hover" id="data-table">
+              <thead>
+                <tr>
+                  <th>Periode</th>
+                  <th>Hijau Masuk</th>
+                  <th>Hijau Keluar</th>
+                  <th>Merah Masuk</th>
+                  <th>Merah Keluar</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="5" class="text-center text-muted">Pilih rentang tanggal dan klik Tampilkan</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Watermark -->
+<div class="watermark">
+  <img src="{{ url_for('static', filename='images/SMOOHT.png') }}" alt="OTI">
+</div>
+
+<!-- Scripts -->
+<script src="{{ url_for('static', filename='flatpickr/flatpickr.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+<script>
+  let chartInstance = null;
+
+  function formatToSQLDatetime(value) {
+    const date = new Date(value);
+    const pad = n => n.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+  }
+
+  document.getElementById('filter-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    loadGrafik();
+  });
+
+  function loadGrafik() {
+    const dari = document.getElementById('dari').value;
+    const ke = document.getElementById('ke').value;
+    const mode = document.getElementById('mode').value;
+
+    if (!dari || !ke) {
+      alert('Silakan pilih rentang tanggal.');
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('dari', formatToSQLDatetime(dari));
+    params.set('ke', formatToSQLDatetime(ke));
+    params.set('mode', mode);
+
+    const tbody = document.querySelector('#data-table tbody');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Memuat data...</td></tr>';
+
+    fetch(`/api/grafik?${params.toString()}`)
+      .then(res => res.json())
+      .then(data => {
+        if (!data.labels || data.labels.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Data tidak ditemukan</td></tr>';
+          if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+          document.getElementById('summary-cards').style.display = 'none';
+          return;
+        }
+
+        // Summary totals
+        const sumHI = data.hijau_in.reduce((a, b) => a + b, 0);
+        const sumHO = data.hijau_out.reduce((a, b) => a + b, 0);
+        const sumMI = data.merah_in.reduce((a, b) => a + b, 0);
+        const sumMO = data.merah_out.reduce((a, b) => a + b, 0);
+
+        document.getElementById('sum-hijau-in').textContent = sumHI;
+        document.getElementById('sum-hijau-out').textContent = sumHO;
+        document.getElementById('sum-merah-in').textContent = sumMI;
+        document.getElementById('sum-merah-out').textContent = sumMO;
+        document.getElementById('summary-cards').style.display = 'flex';
+
+        // Update table
+        tbody.innerHTML = '';
+        data.labels.forEach((label, i) => {
+          tbody.innerHTML += `
+            <tr>
+              <td>${label}</td>
+              <td>${data.hijau_in[i]}</td>
+              <td>${data.hijau_out[i]}</td>
+              <td>${data.merah_in[i]}</td>
+              <td>${data.merah_out[i]}</td>
+            </tr>
+          `;
+        });
+
+        // Update chart
+        renderChart(data);
+      })
+      .catch(err => {
+        console.error(err);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Gagal memuat data</td></tr>';
+      });
+  }
+
+  function renderChart(data) {
+    const ctx = document.getElementById('grafikChart').getContext('2d');
+
+    if (chartInstance) {
+      chartInstance.destroy();
+    }
+
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.labels,
+        datasets: [
+          {
+            label: 'Hijau Masuk',
+            data: data.hijau_in,
+            backgroundColor: 'rgba(40, 167, 69, 0.7)',
+            borderColor: 'rgba(40, 167, 69, 1)',
+            borderWidth: 1
+          },
+          {
+            label: 'Hijau Keluar',
+            data: data.hijau_out,
+            backgroundColor: 'rgba(40, 167, 69, 0.3)',
+            borderColor: 'rgba(40, 167, 69, 0.8)',
+            borderWidth: 1
+          },
+          {
+            label: 'Merah Masuk',
+            data: data.merah_in,
+            backgroundColor: 'rgba(220, 53, 69, 0.7)',
+            borderColor: 'rgba(220, 53, 69, 1)',
+            borderWidth: 1
+          },
+          {
+            label: 'Merah Keluar',
+            data: data.merah_out,
+            backgroundColor: 'rgba(220, 53, 69, 0.3)',
+            borderColor: 'rgba(220, 53, 69, 0.8)',
+            borderWidth: 1
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Grafik Keluar Masuk Per Zona',
+            font: { size: 16 }
+          },
+          legend: {
+            position: 'top'
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: 'Jumlah Orang' }
+          },
+          x: {
+            title: { display: true, text: 'Periode' }
+          }
+        }
+      }
+    });
+  }
+
+  // Export Excel
+  const btnExport = document.getElementById('btn-export');
+  const spinner = document.getElementById('loading-spinner');
+
+  btnExport.addEventListener('click', function (e) {
+    e.preventDefault();
+
+    const dari = document.getElementById('dari').value;
+    const ke = document.getElementById('ke').value;
+    const mode = document.getElementById('mode').value;
+
+    if (!dari || !ke) {
+      alert('Silakan pilih rentang tanggal terlebih dahulu.');
+      return;
+    }
+
+    spinner.style.display = 'block';
+
+    const params = new URLSearchParams();
+    params.set('dari', formatToSQLDatetime(dari));
+    params.set('ke', formatToSQLDatetime(ke));
+    params.set('mode', mode);
+
+    fetch(`/export_grafik?${params.toString()}`)
+      .then(response => {
+        if (!response.ok) throw new Error('Gagal mengunduh file.');
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'grafik_export.xlsx';
+        if (disposition && disposition.includes('filename=')) {
+          const match = disposition.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
+          if (match && match[1]) filename = decodeURIComponent(match[1]);
+        }
+        return response.blob().then(blob => ({ blob, filename }));
+      })
+      .then(({ blob, filename }) => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      })
+      .catch(err => {
+        alert('❌ Gagal mengunduh file: ' + err.message);
+      })
+      .finally(() => {
+        spinner.style.display = 'none';
+      });
+  });
+
+  // Navbar collapse
+  document.querySelectorAll('.navbar-nav .nav-link').forEach(function (el) {
+    el.addEventListener('click', function () {
+      const navbarCollapse = document.getElementById('mainNavbar');
+      const bsCollapse = bootstrap.Collapse.getInstance(navbarCollapse);
+      if (bsCollapse) bsCollapse.hide();
+    });
+  });
+
+  window.addEventListener('DOMContentLoaded', () => {
+    flatpickr('#dari', {
+      enableTime: true,
+      dateFormat: 'Y-m-d H:i',
+      time_24hr: true,
+      defaultDate: new Date(new Date().setDate(new Date().getDate() - 7))
+    });
+
+    flatpickr('#ke', {
+      enableTime: true,
+      dateFormat: 'Y-m-d H:i',
+      time_24hr: true,
+      defaultDate: new Date()
+    });
+
+    setTimeout(() => {
+      const splash = document.getElementById('splash');
+      splash.style.opacity = 0;
+      setTimeout(() => {
+        splash.style.display = 'none';
+        document.getElementById('main-content').style.display = 'block';
+      }, 600);
+    }, 1000);
+  });
+</script>
+</body>
+</html>

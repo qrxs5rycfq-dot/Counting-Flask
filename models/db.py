@@ -5,6 +5,23 @@ from psycopg2.extras import RealDictCursor
 def get_conn():
     return psycopg2.connect(dsn=os.getenv("DATABASE_URL"))
 
+def get_grafik_data(dari, ke):
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    query = """
+        SELECT first_in_time, last_out_time, reader_name_in, reader_name_out
+        FROM acc_firstin_lastout
+        WHERE update_time BETWEEN %s AND %s
+        ORDER BY first_in_time
+    """
+    cur.execute(query, (dari, ke))
+    result = cur.fetchall()
+    cur.close()
+    conn.close()
+    return result
+
+
 def get_transaksi_filtered(pin, nama, dept, dari, ke, page=1, per_page=50):
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
