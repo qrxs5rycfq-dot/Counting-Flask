@@ -10,7 +10,7 @@ def get_grafik_data(dari, ke):
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     query = """
-        SELECT first_in_time, last_out_time, reader_name_in, reader_name_out
+        SELECT dept_name, first_in_time, last_out_time, reader_name_in, reader_name_out
         FROM acc_firstin_lastout
         WHERE update_time BETWEEN %s AND %s
         ORDER BY first_in_time

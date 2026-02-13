@@ -482,13 +482,22 @@ def register_routes(app):
         })
 
     def _aggregate_grafik(dari, ke, mode):
-        """Aggregate entry/exit data per period and zone."""
+        """Aggregate entry/exit/current data per period, department, and zone (POS 1/POS 2)."""
         try:
             records = get_grafik_data(dari, ke)
         except Exception as e:
             logger.error(f"Gagal mengambil data grafik: {e}")
-            return {"labels": [], "hijau_in": [], "hijau_out": [], "merah_in": [], "merah_out": []}
-        aggregated = {}
+            return {
+                "labels": [],
+                "pos1_in": [], "pos1_out": [], "pos1_cur": [],
+                "pos2_in": [], "pos2_out": [], "pos2_cur": [],
+                "departments": []
+            }
+
+        # --- per-period totals ---
+        period_agg = {}
+        # --- per-department totals (across all periods) ---
+        dept_agg = {}
 
         for record in records:
             first_in = record.get("first_in_time")
@@ -496,6 +505,8 @@ def register_routes(app):
             ref_time = first_in or last_out
             if not ref_time:
                 continue
+
+            dept = record.get("dept_name") or "UNKNOWN"
 
             if mode == "week":
                 iso = ref_time.isocalendar()
@@ -505,31 +516,65 @@ def register_routes(app):
             else:
                 label = ref_time.strftime("%Y-%m-%d")
 
-            if label not in aggregated:
-                aggregated[label] = {"hijau_in": 0, "hijau_out": 0, "merah_in": 0, "merah_out": 0}
+            if label not in period_agg:
+                period_agg[label] = {
+                    "pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                    "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0,
+                }
+
+            if dept not in dept_agg:
+                dept_agg[dept] = {
+                    "pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                    "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0,
+                }
 
             device_in = record.get("reader_name_in", "")
             device_out = record.get("reader_name_out", "")
 
-            hijau_in, merah_in = get_zona_from_device(device_in, "IN_DEVICES_HIJAU", "IN_DEVICES_MERAH")
-            hijau_out, merah_out = get_zona_from_device(device_out, "OUT_DEVICES_HIJAU", "OUT_DEVICES_MERAH")
+            pos1_in, pos2_in = get_zona_from_device(device_in, "IN_DEVICES_HIJAU", "IN_DEVICES_MERAH")
+            pos1_out, pos2_out = get_zona_from_device(device_out, "OUT_DEVICES_HIJAU", "OUT_DEVICES_MERAH")
 
-            if hijau_in:
-                aggregated[label]["hijau_in"] += 1
-            if merah_in:
-                aggregated[label]["merah_in"] += 1
-            if hijau_out:
-                aggregated[label]["hijau_out"] += 1
-            if merah_out:
-                aggregated[label]["merah_out"] += 1
+            if pos1_in:
+                period_agg[label]["pos1_in"] += 1
+                dept_agg[dept]["pos1_in"] += 1
+            if pos2_in:
+                period_agg[label]["pos2_in"] += 1
+                dept_agg[dept]["pos2_in"] += 1
+            if pos1_out:
+                period_agg[label]["pos1_out"] += 1
+                dept_agg[dept]["pos1_out"] += 1
+            if pos2_out:
+                period_agg[label]["pos2_out"] += 1
+                dept_agg[dept]["pos2_out"] += 1
 
-        sorted_labels = sorted(aggregated.keys())
+        # current (di dalam) = in - out, consistent with zone pages
+        for label in period_agg:
+            p = period_agg[label]
+            p["pos1_cur"] = max(p["pos1_in"] - p["pos1_out"], 0)
+            p["pos2_cur"] = max(p["pos2_in"] - p["pos2_out"], 0)
+
+        sorted_labels = sorted(period_agg.keys())
+
+        departments = []
+        for dept in sorted(dept_agg.keys()):
+            d = dept_agg[dept]
+            d["pos1_cur"] = max(d["pos1_in"] - d["pos1_out"], 0)
+            d["pos2_cur"] = max(d["pos2_in"] - d["pos2_out"], 0)
+            departments.append({
+                "dept": dept,
+                "pos1_in": d["pos1_in"], "pos1_out": d["pos1_out"], "pos1_cur": d["pos1_cur"],
+                "pos2_in": d["pos2_in"], "pos2_out": d["pos2_out"], "pos2_cur": d["pos2_cur"],
+            })
+
         return {
             "labels": sorted_labels,
-            "hijau_in": [aggregated[l]["hijau_in"] for l in sorted_labels],
-            "hijau_out": [aggregated[l]["hijau_out"] for l in sorted_labels],
-            "merah_in": [aggregated[l]["merah_in"] for l in sorted_labels],
-            "merah_out": [aggregated[l]["merah_out"] for l in sorted_labels],
+            "pos1_in": [period_agg[l]["pos1_in"] for l in sorted_labels],
+            "pos1_out": [period_agg[l]["pos1_out"] for l in sorted_labels],
+            "pos1_cur": [period_agg[l]["pos1_cur"] for l in sorted_labels],
+            "pos2_in": [period_agg[l]["pos2_in"] for l in sorted_labels],
+            "pos2_out": [period_agg[l]["pos2_out"] for l in sorted_labels],
+            "pos2_cur": [period_agg[l]["pos2_cur"] for l in sorted_labels],
+            "departments": departments,
         }
 
     @app.route("/api/grafik")
@@ -562,78 +607,155 @@ def register_routes(app):
         mode_labels = {"day": "Per Hari", "week": "Per Minggu", "month": "Per Bulan"}
 
         wb = Workbook()
-        ws = wb.active
-        ws.title = "Grafik Data"
 
-        # Title row
-        ws.merge_cells("A1:E1")
-        ws["A1"] = f"Grafik Keluar Masuk Per Zona — {mode_labels.get(mode, mode)}"
-        ws["A1"].font = Font(bold=True, size=14)
-        ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        # ── Sheet 1: Per-department summary ──
+        ws_dept = wb.active
+        ws_dept.title = "Data Per Departemen"
 
-        ws.merge_cells("A2:E2")
-        ws["A2"] = f"Periode: {dari} s/d {ke}"
-        ws["A2"].alignment = Alignment(horizontal="center")
+        ws_dept.merge_cells("A1:H1")
+        ws_dept["A1"] = f"Grafik Keluar Masuk Per Zona — {mode_labels.get(mode, mode)}"
+        ws_dept["A1"].font = Font(bold=True, size=14)
+        ws_dept["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
-        # Header row
+        ws_dept.merge_cells("A2:H2")
+        ws_dept["A2"] = f"Periode: {dari} s/d {ke}"
+        ws_dept["A2"].alignment = Alignment(horizontal="center")
+
         header_row = 4
-        headers = ["Periode", "Hijau Masuk", "Hijau Keluar", "Merah Masuk", "Merah Keluar"]
+        dept_headers = ["DEPARTEMEN", "POS 1 MASUK", "POS 1 KELUAR", "POS 1 DI DALAM",
+                        "POS 2 MASUK", "POS 2 KELUAR", "POS 2 DI DALAM"]
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF")
-        align_center = Alignment(horizontal="center", vertical="center")
+        align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         border = Border(
             left=Side(style="thin"), right=Side(style="thin"),
             top=Side(style="thin"), bottom=Side(style="thin")
         )
 
-        for col_idx, h in enumerate(headers, 1):
-            cell = ws.cell(row=header_row, column=col_idx, value=h)
+        for col_idx, h in enumerate(dept_headers, 1):
+            cell = ws_dept.cell(row=header_row, column=col_idx, value=h)
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = align_center
             cell.border = border
 
-        # Data rows
-        for i, label in enumerate(data["labels"]):
+        departments = data.get("departments", [])
+        tot_p1i = tot_p1o = tot_p1c = tot_p2i = tot_p2o = tot_p2c = 0
+        for i, dept in enumerate(departments):
             row_num = header_row + 1 + i
-            values = [label, data["hijau_in"][i], data["hijau_out"][i],
-                      data["merah_in"][i], data["merah_out"][i]]
+            values = [
+                dept["dept"],
+                dept["pos1_in"], dept["pos1_out"], dept["pos1_cur"],
+                dept["pos2_in"], dept["pos2_out"], dept["pos2_cur"],
+            ]
+            tot_p1i += dept["pos1_in"]
+            tot_p1o += dept["pos1_out"]
+            tot_p1c += dept["pos1_cur"]
+            tot_p2i += dept["pos2_in"]
+            tot_p2o += dept["pos2_out"]
+            tot_p2c += dept["pos2_cur"]
             for col_idx, val in enumerate(values, 1):
-                cell = ws.cell(row=row_num, column=col_idx, value=val)
+                cell = ws_dept.cell(row=row_num, column=col_idx, value=val)
                 cell.alignment = align_center
                 cell.border = border
 
-        last_data_row = header_row + len(data["labels"])
+        # Total row
+        total_row = header_row + 1 + len(departments)
+        total_vals = ["TOTAL", tot_p1i, tot_p1o, tot_p1c, tot_p2i, tot_p2o, tot_p2c]
+        for col_idx, val in enumerate(total_vals, 1):
+            cell = ws_dept.cell(row=total_row, column=col_idx, value=val)
+            cell.font = Font(bold=True)
+            cell.alignment = align_center
+            cell.border = border
 
-        # Auto-adjust column widths
-        for col_idx in range(1, 6):
-            ws.column_dimensions[get_column_letter(col_idx)].width = 18
+        for col_idx in range(1, 8):
+            ws_dept.column_dimensions[get_column_letter(col_idx)].width = 20
 
-        # Create bar chart
+        # Department chart
+        if departments:
+            chart_dept = BarChart()
+            chart_dept.type = "col"
+            chart_dept.grouping = "clustered"
+            chart_dept.title = "Data Per Departemen"
+            chart_dept.y_axis.title = "Jumlah Orang"
+            chart_dept.x_axis.title = "Departemen"
+            chart_dept.width = 30
+            chart_dept.height = 14
+
+            chart_data_ref = Reference(ws_dept, min_col=2, min_row=header_row, max_col=7, max_row=total_row - 1)
+            cats_ref = Reference(ws_dept, min_col=1, min_row=header_row + 1, max_row=total_row - 1)
+            chart_dept.add_data(chart_data_ref, titles_from_data=True)
+            chart_dept.set_categories(cats_ref)
+
+            dept_colors = ["28A745", "90EE90", "198754", "DC3545", "FF6B6B", "B02A37"]
+            for idx, color in enumerate(dept_colors):
+                if idx < len(chart_dept.series):
+                    chart_dept.series[idx].graphicalProperties.solidFill = color
+
+            ws_dept.add_chart(chart_dept, f"A{total_row + 2}")
+
+        # ── Sheet 2: Per-period time series ──
+        ws_ts = wb.create_sheet("Data Per Periode")
+
+        ws_ts.merge_cells("A1:H1")
+        ws_ts["A1"] = f"Grafik Keluar Masuk Per Zona — {mode_labels.get(mode, mode)}"
+        ws_ts["A1"].font = Font(bold=True, size=14)
+        ws_ts["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+        ws_ts.merge_cells("A2:H2")
+        ws_ts["A2"] = f"Periode: {dari} s/d {ke}"
+        ws_ts["A2"].alignment = Alignment(horizontal="center")
+
+        ts_header_row = 4
+        ts_headers = ["Periode", "POS 1 Masuk", "POS 1 Keluar", "POS 1 Di Dalam",
+                       "POS 2 Masuk", "POS 2 Keluar", "POS 2 Di Dalam"]
+        for col_idx, h in enumerate(ts_headers, 1):
+            cell = ws_ts.cell(row=ts_header_row, column=col_idx, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = align_center
+            cell.border = border
+
+        for i, label in enumerate(data["labels"]):
+            row_num = ts_header_row + 1 + i
+            values = [
+                label,
+                data["pos1_in"][i], data["pos1_out"][i], data["pos1_cur"][i],
+                data["pos2_in"][i], data["pos2_out"][i], data["pos2_cur"][i],
+            ]
+            for col_idx, val in enumerate(values, 1):
+                cell = ws_ts.cell(row=row_num, column=col_idx, value=val)
+                cell.alignment = align_center
+                cell.border = border
+
+        last_ts_row = ts_header_row + len(data["labels"])
+
+        for col_idx in range(1, 8):
+            ws_ts.column_dimensions[get_column_letter(col_idx)].width = 18
+
+        # Time-series chart
         chart = BarChart()
         chart.type = "col"
         chart.grouping = "clustered"
         chart.title = f"Grafik Keluar Masuk — {mode_labels.get(mode, mode)}"
         chart.y_axis.title = "Jumlah Orang"
         chart.x_axis.title = "Periode"
-        chart.width = 28
+        chart.width = 30
         chart.height = 14
 
-        chart_data = Reference(ws, min_col=2, min_row=header_row, max_col=5, max_row=last_data_row)
-        cats = Reference(ws, min_col=1, min_row=header_row + 1, max_row=last_data_row)
+        chart_data = Reference(ws_ts, min_col=2, min_row=ts_header_row, max_col=7, max_row=last_ts_row)
+        cats = Reference(ws_ts, min_col=1, min_row=ts_header_row + 1, max_row=last_ts_row)
         chart.add_data(chart_data, titles_from_data=True)
         chart.set_categories(cats)
 
-        # Set series colors
-        colors = ["28A745", "90EE90", "DC3545", "FF6B6B"]
-        for idx, color in enumerate(colors):
+        ts_colors = ["28A745", "90EE90", "198754", "DC3545", "FF6B6B", "B02A37"]
+        for idx, color in enumerate(ts_colors):
             if idx < len(chart.series):
                 chart.series[idx].graphicalProperties.solidFill = color
 
-        chart_anchor = f"A{last_data_row + 2}"
-        ws.add_chart(chart, chart_anchor)
+        ws_ts.add_chart(chart, f"A{last_ts_row + 2}")
 
-        logger.info(f"Export grafik oleh {request.remote_addr}: {dari} - {ke}, mode={mode}, {len(data['labels'])} periode")
+        logger.info(f"Export grafik oleh {request.remote_addr}: {dari} - {ke}, mode={mode}, {len(data['labels'])} periode, {len(departments)} dept")
 
         virtual_file = io.BytesIO()
         try:

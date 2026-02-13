@@ -203,35 +203,51 @@
 
           <!-- Summary Cards -->
           <div class="row summary-cards mb-4" id="summary-cards" style="display:none;">
-            <div class="col-md-3 mb-2">
+            <div class="col-md-2 mb-2">
               <div class="card bg-success text-white text-center">
                 <div class="card-body">
-                  <h6>ZONA HIJAU - MASUK</h6>
-                  <h3 class="fw-bold" id="sum-hijau-in">0</h3>
+                  <h6>POS 1 - MASUK</h6>
+                  <h3 class="fw-bold" id="sum-pos1-in">0</h3>
                 </div>
               </div>
             </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-2 mb-2">
               <div class="card bg-secondary text-white text-center">
                 <div class="card-body">
-                  <h6>ZONA HIJAU - KELUAR</h6>
-                  <h3 class="fw-bold" id="sum-hijau-out">0</h3>
+                  <h6>POS 1 - KELUAR</h6>
+                  <h3 class="fw-bold" id="sum-pos1-out">0</h3>
                 </div>
               </div>
             </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-2 mb-2">
+              <div class="card bg-primary text-white text-center">
+                <div class="card-body">
+                  <h6>POS 1 - DI DALAM</h6>
+                  <h3 class="fw-bold" id="sum-pos1-cur">0</h3>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-2 mb-2">
               <div class="card bg-danger text-white text-center">
                 <div class="card-body">
-                  <h6>ZONA MERAH - MASUK</h6>
-                  <h3 class="fw-bold" id="sum-merah-in">0</h3>
+                  <h6>POS 2 - MASUK</h6>
+                  <h3 class="fw-bold" id="sum-pos2-in">0</h3>
                 </div>
               </div>
             </div>
-            <div class="col-md-3 mb-2">
+            <div class="col-md-2 mb-2">
               <div class="card bg-warning text-dark text-center">
                 <div class="card-body">
-                  <h6>ZONA MERAH - KELUAR</h6>
-                  <h3 class="fw-bold" id="sum-merah-out">0</h3>
+                  <h6>POS 2 - KELUAR</h6>
+                  <h3 class="fw-bold" id="sum-pos2-out">0</h3>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-2 mb-2">
+              <div class="card bg-info text-white text-center">
+                <div class="card-body">
+                  <h6>POS 2 - DI DALAM</h6>
+                  <h3 class="fw-bold" id="sum-pos2-cur">0</h3>
                 </div>
               </div>
             </div>
@@ -242,20 +258,63 @@
             <canvas id="grafikChart"></canvas>
           </div>
 
-          <!-- Data Table -->
-          <div class="table-responsive">
-            <table class="table table-bordered table-striped table-hover" id="data-table">
+          <!-- Department Table -->
+          <h5 class="fw-bold mb-3">Data Per Departemen</h5>
+          <div class="table-responsive mb-4">
+            <table class="table table-bordered table-striped table-hover" id="dept-table">
               <thead>
                 <tr>
-                  <th>Periode</th>
-                  <th>Hijau Masuk</th>
-                  <th>Hijau Keluar</th>
-                  <th>Merah Masuk</th>
-                  <th>Merah Keluar</th>
+                  <th rowspan="2" class="align-middle text-center">DEPARTEMEN</th>
+                  <th colspan="3" class="text-center bg-success text-white">POS 1</th>
+                  <th colspan="3" class="text-center bg-danger text-white">POS 2</th>
+                </tr>
+                <tr>
+                  <th class="text-center">MASUK</th>
+                  <th class="text-center">KELUAR</th>
+                  <th class="text-center">DI DALAM</th>
+                  <th class="text-center">MASUK</th>
+                  <th class="text-center">KELUAR</th>
+                  <th class="text-center">DI DALAM</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr><td colspan="5" class="text-center text-muted">Pilih rentang tanggal dan klik Tampilkan</td></tr>
+              <tbody id="dept-body">
+                <tr><td colspan="7" class="text-center text-muted">Pilih rentang tanggal dan klik Tampilkan</td></tr>
+              </tbody>
+              <tfoot id="dept-foot" style="display:none;">
+                <tr class="fw-bold">
+                  <td class="text-center">TOTAL</td>
+                  <td class="text-center" id="foot-p1i">0</td>
+                  <td class="text-center" id="foot-p1o">0</td>
+                  <td class="text-center" id="foot-p1c">0</td>
+                  <td class="text-center" id="foot-p2i">0</td>
+                  <td class="text-center" id="foot-p2o">0</td>
+                  <td class="text-center" id="foot-p2c">0</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <!-- Period Table -->
+          <h5 class="fw-bold mb-3">Data Per Periode</h5>
+          <div class="table-responsive">
+            <table class="table table-bordered table-striped table-hover" id="period-table">
+              <thead>
+                <tr>
+                  <th rowspan="2" class="align-middle text-center">Periode</th>
+                  <th colspan="3" class="text-center bg-success text-white">POS 1</th>
+                  <th colspan="3" class="text-center bg-danger text-white">POS 2</th>
+                </tr>
+                <tr>
+                  <th class="text-center">Masuk</th>
+                  <th class="text-center">Keluar</th>
+                  <th class="text-center">Di Dalam</th>
+                  <th class="text-center">Masuk</th>
+                  <th class="text-center">Keluar</th>
+                  <th class="text-center">Di Dalam</th>
+                </tr>
+              </thead>
+              <tbody id="period-body">
+                <tr><td colspan="7" class="text-center text-muted">Pilih rentang tanggal dan klik Tampilkan</td></tr>
               </tbody>
             </table>
           </div>
@@ -305,51 +364,92 @@
     params.set('ke', formatToSQLDatetime(ke));
     params.set('mode', mode);
 
-    const tbody = document.querySelector('#data-table tbody');
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Memuat data...</td></tr>';
+    const deptBody = document.getElementById('dept-body');
+    const periodBody = document.getElementById('period-body');
+    deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Memuat data...</td></tr>';
+    periodBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Memuat data...</td></tr>';
 
     fetch(`/api/grafik?${params.toString()}`)
       .then(res => res.json())
       .then(data => {
-        if (!data.labels || data.labels.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Data tidak ditemukan</td></tr>';
+        if ((!data.labels || data.labels.length === 0) && (!data.departments || data.departments.length === 0)) {
+          deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Data tidak ditemukan</td></tr>';
+          periodBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Data tidak ditemukan</td></tr>';
           if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
           document.getElementById('summary-cards').style.display = 'none';
+          document.getElementById('dept-foot').style.display = 'none';
           return;
         }
 
         // Summary totals
-        const sumHI = data.hijau_in.reduce((a, b) => a + b, 0);
-        const sumHO = data.hijau_out.reduce((a, b) => a + b, 0);
-        const sumMI = data.merah_in.reduce((a, b) => a + b, 0);
-        const sumMO = data.merah_out.reduce((a, b) => a + b, 0);
+        const sumP1I = data.pos1_in.reduce((a, b) => a + b, 0);
+        const sumP1O = data.pos1_out.reduce((a, b) => a + b, 0);
+        const sumP1C = data.pos1_cur.reduce((a, b) => a + b, 0);
+        const sumP2I = data.pos2_in.reduce((a, b) => a + b, 0);
+        const sumP2O = data.pos2_out.reduce((a, b) => a + b, 0);
+        const sumP2C = data.pos2_cur.reduce((a, b) => a + b, 0);
 
-        document.getElementById('sum-hijau-in').textContent = sumHI;
-        document.getElementById('sum-hijau-out').textContent = sumHO;
-        document.getElementById('sum-merah-in').textContent = sumMI;
-        document.getElementById('sum-merah-out').textContent = sumMO;
+        document.getElementById('sum-pos1-in').textContent = sumP1I;
+        document.getElementById('sum-pos1-out').textContent = sumP1O;
+        document.getElementById('sum-pos1-cur').textContent = sumP1C;
+        document.getElementById('sum-pos2-in').textContent = sumP2I;
+        document.getElementById('sum-pos2-out').textContent = sumP2O;
+        document.getElementById('sum-pos2-cur').textContent = sumP2C;
         document.getElementById('summary-cards').style.display = 'flex';
 
-        // Update table
-        tbody.innerHTML = '';
-        data.labels.forEach((label, i) => {
-          tbody.innerHTML += `
-            <tr>
-              <td>${label}</td>
-              <td>${data.hijau_in[i]}</td>
-              <td>${data.hijau_out[i]}</td>
-              <td>${data.merah_in[i]}</td>
-              <td>${data.merah_out[i]}</td>
-            </tr>
-          `;
-        });
+        // Department table
+        deptBody.innerHTML = '';
+        if (data.departments && data.departments.length > 0) {
+          data.departments.forEach(dept => {
+            deptBody.innerHTML += `
+              <tr>
+                <td class="text-start fw-bold">${dept.dept}</td>
+                <td class="text-center">${dept.pos1_in}</td>
+                <td class="text-center">${dept.pos1_out}</td>
+                <td class="text-center">${dept.pos1_cur}</td>
+                <td class="text-center">${dept.pos2_in}</td>
+                <td class="text-center">${dept.pos2_out}</td>
+                <td class="text-center">${dept.pos2_cur}</td>
+              </tr>
+            `;
+          });
+          document.getElementById('foot-p1i').textContent = sumP1I;
+          document.getElementById('foot-p1o').textContent = sumP1O;
+          document.getElementById('foot-p1c').textContent = sumP1C;
+          document.getElementById('foot-p2i').textContent = sumP2I;
+          document.getElementById('foot-p2o').textContent = sumP2O;
+          document.getElementById('foot-p2c').textContent = sumP2C;
+          document.getElementById('dept-foot').style.display = '';
+        } else {
+          deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Tidak ada data departemen</td></tr>';
+          document.getElementById('dept-foot').style.display = 'none';
+        }
+
+        // Period table
+        periodBody.innerHTML = '';
+        if (data.labels && data.labels.length > 0) {
+          data.labels.forEach((label, i) => {
+            periodBody.innerHTML += `
+              <tr>
+                <td class="text-center">${label}</td>
+                <td class="text-center">${data.pos1_in[i]}</td>
+                <td class="text-center">${data.pos1_out[i]}</td>
+                <td class="text-center">${data.pos1_cur[i]}</td>
+                <td class="text-center">${data.pos2_in[i]}</td>
+                <td class="text-center">${data.pos2_out[i]}</td>
+                <td class="text-center">${data.pos2_cur[i]}</td>
+              </tr>
+            `;
+          });
+        }
 
         // Update chart
         renderChart(data);
       })
       .catch(err => {
         console.error(err);
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Gagal memuat data</td></tr>';
+        deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Gagal memuat data</td></tr>';
+        periodBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Gagal memuat data</td></tr>';
       });
   }
 
@@ -366,31 +466,45 @@
         labels: data.labels,
         datasets: [
           {
-            label: 'Hijau Masuk',
-            data: data.hijau_in,
+            label: 'POS 1 Masuk',
+            data: data.pos1_in,
             backgroundColor: 'rgba(40, 167, 69, 0.7)',
             borderColor: 'rgba(40, 167, 69, 1)',
             borderWidth: 1
           },
           {
-            label: 'Hijau Keluar',
-            data: data.hijau_out,
+            label: 'POS 1 Keluar',
+            data: data.pos1_out,
             backgroundColor: 'rgba(40, 167, 69, 0.3)',
             borderColor: 'rgba(40, 167, 69, 0.8)',
             borderWidth: 1
           },
           {
-            label: 'Merah Masuk',
-            data: data.merah_in,
+            label: 'POS 1 Di Dalam',
+            data: data.pos1_cur,
+            backgroundColor: 'rgba(25, 135, 84, 0.5)',
+            borderColor: 'rgba(25, 135, 84, 1)',
+            borderWidth: 1
+          },
+          {
+            label: 'POS 2 Masuk',
+            data: data.pos2_in,
             backgroundColor: 'rgba(220, 53, 69, 0.7)',
             borderColor: 'rgba(220, 53, 69, 1)',
             borderWidth: 1
           },
           {
-            label: 'Merah Keluar',
-            data: data.merah_out,
+            label: 'POS 2 Keluar',
+            data: data.pos2_out,
             backgroundColor: 'rgba(220, 53, 69, 0.3)',
             borderColor: 'rgba(220, 53, 69, 0.8)',
+            borderWidth: 1
+          },
+          {
+            label: 'POS 2 Di Dalam',
+            data: data.pos2_cur,
+            backgroundColor: 'rgba(176, 42, 55, 0.5)',
+            borderColor: 'rgba(176, 42, 55, 1)',
             borderWidth: 1
           }
         ]
