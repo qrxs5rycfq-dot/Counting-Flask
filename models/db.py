@@ -7,16 +7,16 @@ def get_conn():
 
 def get_grafik_data(dari, ke):
     """
-    Query acc_transaction for the date range AND the previous day,
-    matching EventFetcher.fetch_combined_events() logic used by zone pages.
-    Returns (today_events, prev_events) where prev_events are from previous day.
+    Fetch events from previous-day-midnight through ke in ONE combined list.
+    This matches EventFetcher.fetch_combined_events() which combines
+    yesterday + today into a single list for EventProcessor.
     """
     from datetime import datetime as _dt, timedelta
 
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
-    # Parse the 'dari' date to compute the previous day range
+    # Parse 'dari' to compute the previous day start (same as EventFetcher)
     if isinstance(dari, str):
         try:
             dari_dt = _dt.strptime(dari.strip(), "%Y-%m-%d %H:%M:%S")
@@ -25,30 +25,21 @@ def get_grafik_data(dari, ke):
     else:
         dari_dt = dari
 
-    prev_start = (dari_dt.replace(hour=0, minute=0, second=0) - timedelta(days=1))
-    prev_end = dari_dt.replace(hour=0, minute=0, second=0)
+    # Start from previous day midnight (matching EventFetcher.fetch_combined_events)
+    prev_start = dari_dt.replace(hour=0, minute=0, second=0) - timedelta(days=1)
 
-    # Fetch previous-day events (for carry-over detection, same as EventFetcher)
+    # Single query: previous-day-midnight → ke (combined, like EventFetcher)
     cur.execute("""
         SELECT pin, name, dept_name, dev_alias, event_point_name, event_time
         FROM acc_transaction
         WHERE event_time BETWEEN %s AND %s
         ORDER BY event_time ASC
-    """, (prev_start, prev_end))
-    prev_events = cur.fetchall()
-
-    # Fetch main date range events
-    cur.execute("""
-        SELECT pin, name, dept_name, dev_alias, event_point_name, event_time
-        FROM acc_transaction
-        WHERE event_time BETWEEN %s AND %s
-        ORDER BY event_time ASC
-    """, (dari, ke))
-    today_events = cur.fetchall()
+    """, (prev_start, ke))
+    events = cur.fetchall()
 
     cur.close()
     conn.close()
-    return today_events, prev_events
+    return events
 
 
 def get_transaksi_filtered(pin, nama, dept, dari, ke, page=1, per_page=50):

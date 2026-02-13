@@ -11,7 +11,7 @@ import re
 import unicodedata
 import psycopg2
 import psycopg2.extras
-from datetime import datetime, time as dt_time
+from datetime import datetime
 from dateutil import parser
 
 from flask import render_template, request, jsonify, redirect, url_for, flash, send_file
@@ -481,11 +481,11 @@ def register_routes(app):
             "rows": result
         })
 
-    def _process_zone_events(events, in_devices, out_devices, prev_events=None):
+    def _process_zone_events(events, in_devices, out_devices):
         """
-        Synchronous replica of EventProcessor state-machine logic for one zone.
-        Includes prev_events carry-over logic (same as EventProcessor._prepare_prev_lookup).
-        Returns per_person dict with logical_in, logical_out, current per person.
+        Synchronous replica of EventProcessor.process_events() for one zone.
+        Events should include previous day + today combined (same as zone pages).
+        No separate prev_events — carry-over happens naturally through the state machine.
         """
         in_devs = {d.strip().upper() for d in in_devices}
         out_devs = {d.strip().upper() for d in out_devices}
@@ -508,53 +508,30 @@ def register_routes(app):
             except (ValueError, TypeError, OSError):
                 return None
 
-        def resolve_device(e):
+        # Step 1: Collect events per person (same as EventProcessor)
+        per_person = {}
+        for e in events:
+            pin = (e.get("pin") or "").strip()
+            name = (e.get("name") or "").strip()
+            dept = (e.get("dept_name") or "").strip()
+
             dev_alias = str(e.get("dev_alias") or "").strip().upper()
             event_point_name = str(e.get("event_point_name") or "").strip().upper()
+
+            # Device resolution: match -READER pattern (same as EventProcessor)
             dev = dev_alias
             for reader_dev in (reader_in | reader_out):
                 base_name = reader_dev.replace("-READER", "").strip().upper()
                 if event_point_name == base_name:
                     dev = event_point_name
                     break
-            return dev
 
-        # Step 1: Build prev_lookup (same as EventProcessor._prepare_prev_lookup)
-        prev_lookup = {}
-        if prev_events:
-            for e in prev_events:
-                pin = (e.get("pin") or "").strip()
-                dev = resolve_device(e)
-                time_raw = e.get("event_time")
-                time_str = str(time_raw).strip() if time_raw else ""
-                ts = ts_from_val(time_raw)
-                ev_type = get_type(dev)
-                if not pin or ts is None or not ev_type:
-                    continue
-                # Same time filter as EventProcessor: after 21:00 or before 12:00
-                try:
-                    if isinstance(time_raw, datetime):
-                        dt = time_raw
-                    else:
-                        dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-                    if dt.time() >= dt_time(21, 0) or dt.time() <= dt_time(12, 0):
-                        prev_lookup.setdefault(pin, []).append({
-                            "type": ev_type, "ts": ts, "time": time_str
-                        })
-                except (ValueError, TypeError):
-                    continue
-
-        # Step 2: collect today's events per person
-        per_person = {}
-        for e in events:
-            pin = (e.get("pin") or "").strip()
-            name = (e.get("name") or "").strip()
-            dept = (e.get("dept_name") or "").strip() or "UNKNOWN"
-
-            dev = resolve_device(e)
             time_raw = e.get("event_time")
+            time_str = str(time_raw).strip() if time_raw else ""
             ts = ts_from_val(time_raw)
-            if not pin or not dev or ts is None:
+
+            # Same skip conditions as EventProcessor
+            if not all([dept, pin, dev, time_str]) or ts is None:
                 continue
 
             ev_type = get_type(dev)
@@ -562,27 +539,9 @@ def register_routes(app):
                 continue
 
             person = per_person.setdefault(pin, {"dept": dept, "name": name, "events": []})
-            person["events"].append({"type": ev_type, "ts": ts, "time": str(time_raw).strip() if time_raw else ""})
+            person["events"].append({"type": ev_type, "ts": ts, "time": time_str})
 
-        # Step 3: Merge prev_lookup (same as EventProcessor)
-        for pin, prev_evs in prev_lookup.items():
-            if pin in per_person:
-                events_list = per_person[pin]["events"]
-                for prev_ev in prev_evs:
-                    if prev_ev["type"] == "in" and not any(ev["ts"] == prev_ev["ts"] for ev in events_list):
-                        events_list.append(prev_ev)
-                per_person[pin]["events"] = sorted(events_list, key=lambda x: x["ts"])
-            else:
-                in_prev = [ev for ev in prev_evs if ev["type"] == "in"]
-                if in_prev:
-                    best_in = max(in_prev, key=lambda x: x["ts"])
-                    per_person[pin] = {
-                        "dept": "UNKNOWN",
-                        "name": "",
-                        "events": [best_in],
-                    }
-
-        # Step 4: state-machine per person (same logic as EventProcessor)
+        # Step 2: State-machine per person (same logic as EventProcessor)
         result = {}
         for pin, person in per_person.items():
             events_sorted = sorted(person["events"], key=lambda x: x["ts"])
@@ -615,9 +574,9 @@ def register_routes(app):
 
     def _aggregate_grafik(dari, ke):
         """
-        Aggregate entry/exit/current data per department and zone
-        using the same EventProcessor + SummaryBuilder logic as zone pages.
-        Includes previous-day carry-over detection.
+        Aggregate entry/exit/current data per department and zone.
+        Uses the same approach as zone pages: fetch combined yesterday+today events,
+        process all through the state machine at once.
         """
         empty = {
             "pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
@@ -625,12 +584,12 @@ def register_routes(app):
             "departments": []
         }
         try:
-            today_events, prev_events = get_grafik_data(dari, ke)
+            events = get_grafik_data(dari, ke)
         except Exception as e:
             logger.error(f"Gagal mengambil data grafik: {e}")
             return empty
 
-        if not today_events and not prev_events:
+        if not events:
             return empty
 
         # Device configs (same env vars as tracker_worker)
@@ -639,9 +598,9 @@ def register_routes(app):
         in_merah = [d.strip() for d in os.getenv("IN_DEVICES_MERAH", "").split(",") if d.strip()]
         out_merah = [d.strip() for d in os.getenv("OUT_DEVICES_MERAH", "").split(",") if d.strip()]
 
-        # Process each zone through the state machine (with prev_events carry-over)
-        pos1_persons = _process_zone_events(today_events, in_hijau, out_hijau, prev_events)
-        pos2_persons = _process_zone_events(today_events, in_merah, out_merah, prev_events)
+        # Process each zone (combined events, same as zone pages)
+        pos1_persons = _process_zone_events(events, in_hijau, out_hijau)
+        pos2_persons = _process_zone_events(events, in_merah, out_merah)
 
         # Aggregate per department (same as SummaryBuilder.build)
         dept_agg = {}
