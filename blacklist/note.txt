@@ -1,0 +1,7 @@
+pyinstaller --clean --onefile --noconsole ^
+  --add-data "templates;templates" ^
+  --add-data "static;static" ^
+  --icon=app.ico ^
+  main.py
+
+shell:common startup

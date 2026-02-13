@@ -1,0 +1,38 @@
+Traceback (most recent call last):
+  File "C:\counting\worker\tracker_worker.py", line 7, in <module>
+    import schedule
+ModuleNotFoundError: No module named 'schedule'
+Exception in thread Thread-1 (start_worker_with_restart):
+Traceback (most recent call last):
+  File "C:\counting\worker\tracker_worker.py", line 55, in start_worker_with_restart
+    run_scheduler()
+    ~~~~~~~~~~~~~^^
+  File "C:\counting\worker\tracker_worker.py", line 42, in run_scheduler
+    print("[Worker] \U0001f680 Scheduler started.")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680' in position 9: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\counting\worker\tracker_worker.py", line 57, in start_worker_with_restart
+    print(f"[Worker] \u2757 Fatal error: {e} - restarting in 5s...")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2757' in position 9: character maps to <undefined>
+[Worker] Starting with auto-restart protection...
+Traceback (most recent call last):
+  File "C:\counting\worker\tracker_worker.py", line 7, in <module>
+    import schedule
+ModuleNotFoundError: No module named 'schedule'

@@ -1,0 +1,700 @@
+import os
+import sys
+import logging
+
+import time
+import base64
+import requests
+import io
+import json
+import re
+import unicodedata
+import psycopg2
+import psycopg2.extras
+from datetime import datetime
+from dateutil import parser
+
+from flask import render_template, request, jsonify, redirect, url_for, flash, send_file
+from werkzeug.utils import secure_filename
+
+from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.styles import Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+from app.utils.helpers import get_departments, get_zone_data, allowed_file
+from blacklist.blacklist_tracker import BlacklistTracker
+from models.db import get_transaksi_filtered
+
+# ─── Logging Setup ─────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+def get_zona_from_device(device_name, hijau_key, merah_key):
+    hijau_devices = [d.strip().lower() for d in os.getenv(hijau_key, "").split(",")]
+    merah_devices = [d.strip().lower() for d in os.getenv(merah_key, "").split(",")]
+
+    name = (device_name or "").lower()
+    hijau = name if any(h in name for h in hijau_devices) else ""
+    merah = name if any(m in name for m in merah_devices) else ""
+    return hijau, merah
+
+def apply_excel_header(ws, tahun: int):
+    for col in "ABCDEFGHIJKLMN":
+        ws.column_dimensions[col].auto_size = True
+    ws.column_dimensions['M'].width = 18
+    ws.column_dimensions['N'].width = 35
+
+    ws.merge_cells('A1:N5')
+    ws.merge_cells('A6:B7')
+    ws.merge_cells('A8:B8')
+    ws.merge_cells('A9:B9')
+    ws.merge_cells('C6:D7')
+    ws.merge_cells('C8:D8')
+    ws.merge_cells('C9:D9')
+    ws.merge_cells('E6:L9')
+    ws.merge_cells('M6:M6')
+    ws.merge_cells('M7:M7')
+    ws.merge_cells('M8:M8')
+    ws.merge_cells('M9:M9')
+    ws.merge_cells('N6:N6')
+    ws.merge_cells('N7:N7')
+    ws.merge_cells('N8:N8')
+    ws.merge_cells('N9:N9')
+    ws.merge_cells('A10:A11')
+    ws.merge_cells('B10:B11')
+    ws.merge_cells('C10:C11')
+    ws.merge_cells('D10:D11')
+    ws.merge_cells('E10:E11')
+    ws.merge_cells('F10:F11')
+    ws.merge_cells('G10:G11')
+    ws.merge_cells('H10:I10')
+    ws.merge_cells('J10:J11')
+    ws.merge_cells('K10:L10')
+    ws.merge_cells('M10:M11')
+    ws.merge_cells('N10:N11')
+
+    ws["A6"] = "HARI"
+    ws["A8"] = "TANGGAL"
+    ws["A9"] = "JAM"
+    ws["E6"] = os.getenv("EXCEL_TITLE", "MONITORING MASUK KELUAR ORANG PT. PLN INDONESIA POWER UBP SURALAYA")
+    ws["M6"] = "NOMOR DOKUMEN"
+    ws["N6"] = os.getenv("NOMOR_DOKUMEN", "PB.13.7.20.7.7FRM.18.SLA")
+    ws["M7"] = "TANGGAL"
+    ws["N7"] = f"15 MEI {tahun}"
+    ws["M8"] = "REVISI"
+    ws["N8"] = "00"
+    ws["M9"] = "HALAMAN"
+
+    ws["A10"] = "NO"
+    ws["B10"] = "NAMA PERUSAHAAN"
+    ws["C10"] = "NAMA PEGAWAI"
+    ws["D10"] = "NIP"
+    ws["E10"] = "JABATAN"
+    ws["F10"] = "JENIS PEKERJAAN"
+    ws["G10"] = "FIRST IN TIME"
+    ws["H10"] = "ZONA MASUK"
+    ws["H11"] = "AREA TERBATAS"
+    ws["I11"] = "AREA TERLARANG"
+    ws["J10"] = "LAST OUT TIME"
+    ws["K10"] = "ZONA KELUAR"
+    ws["K11"] = "AREA TERBATAS"
+    ws["L11"] = "AREA TERLARANG"
+    ws["M10"] = "NO. SPK/LOI/MEMO"
+    ws["N10"] = "PARAF / NAMA ANGGOTA SATPAM"
+
+    align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+
+    for row in ws.iter_rows(min_row=6, max_row=11, min_col=1, max_col=14):
+        for cell in row:
+            cell.alignment = align_center
+            cell.border = border
+
+def normalize(text: str) -> str:
+    if not text:
+        return ""
+    # Ubah ke huruf besar, hapus karakter non-alfanumerik, ubah spasi ke _
+    text = unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("utf-8")
+    text = text.upper()
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", "_", text)
+    return text.strip()
+
+def match_device_name(device_name: str, device_pos_list: list[str]) -> str:
+    if not device_name:
+        return ""
+
+    norm_device_name = normalize(device_name)
+    normalized_pos_map = {normalize(pos): pos for pos in device_pos_list if pos}
+
+    for norm_pos, original_pos in normalized_pos_map.items():
+        if norm_pos in norm_device_name:
+            # logging.info(f"[MATCH] Device '{device_name}' cocok dengan ENV '{original_pos}'")
+            return original_pos
+
+    # Coba cari pola "POS" + angka
+    match_pos_number = re.search(r'pos[\s_\-]*([0-9]+)', device_name, re.IGNORECASE)
+    if match_pos_number:
+        number = match_pos_number.group(1)
+        label = f"POS {int(number)}"
+        # logging.info(f"[MATCH] Device '{device_name}' dikenali sebagai '{label}' dari angka")
+        return label
+
+    # Cari pola "POS" + label
+    match_pos_label = re.search(r'pos[\s_\-]+([a-zA-Z]+)', device_name, re.IGNORECASE)
+    if match_pos_label:
+        label = match_pos_label.group(1).upper()
+        result = f"POS {label}"
+        # logging.info(f"[MATCH] Device '{device_name}' dikenali sebagai '{result}' dari label")
+        return result
+
+    # Gagal cocokkan
+    # logging.warning(f"[NO MATCH] Device '{device_name}' tidak cocok dengan ENV atau pola")
+    return device_name
+
+def get_attribute_values(conn, person_id: str, attr_names: list[str]) -> dict:
+    """
+    Mengembalikan dictionary: {attr_name: value}, berdasarkan filed_index dari pers_attribute.
+    Ambil data dari pers_attribute_ext berdasarkan kolom bernama attr_value{index}.
+    """
+    attr_names = [attr.strip().upper() for attr in attr_names if attr.strip()]
+    if not attr_names:
+        return {}
+
+    filed_indexes = {}
+    with conn.cursor() as cursor:
+        # Step 1: Ambil filed_index untuk setiap attr_name dari pers_attribute
+        for attr in attr_names:
+            cursor.execute("""
+                SELECT filed_index
+                FROM pers_attribute
+                WHERE UPPER(attr_name) = %s
+                LIMIT 1
+            """, (attr,))
+            res = cursor.fetchone()
+            if res and res[0] is not None:
+                filed_indexes[attr] = res[0]
+
+        if not filed_indexes:
+            return {}
+
+        # Step 2: Ambil kolom attr_valueN sesuai filed_index
+        column_names = [f"attr_value{index}" for index in filed_indexes.values()]
+        sql_columns = ", ".join(column_names)
+
+        cursor.execute(f"""
+            SELECT {sql_columns}
+            FROM pers_attribute_ext
+            WHERE person_id = %s
+            LIMIT 1
+        """, (person_id,))
+        row = cursor.fetchone()
+
+    if not row:
+        return {}
+
+    attr_values = {}
+    for i, (attr, index) in enumerate(filed_indexes.items()):
+        col_name = f"attr_value{index}"
+        value = row[i] if i < len(row) else None
+        attr_values[attr] = value if value is not None else ""
+
+    return attr_values
+
+def write_excel_data(ws, records, conn):
+    align_center = Alignment(horizontal="center", vertical="center", wrap_text=False)
+    border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+
+    # Ambil atribut dari ENV dan pastikan huruf besar
+    attr_names = [a.strip().upper() for a in os.getenv("ATTRIBUT_TRANSAKSI", "").split(",") if a.strip()]
+    device_pos_list = [x.strip() for x in os.getenv("DEVICE_POS", "").split(",") if x.strip()]
+
+    row_num = 12
+    no = 1
+
+    for record in records:
+        dept_name = record.get("dept_name", "")
+        name = record.get("name", "")
+        pin = record.get("pin", "")
+        person_id = record.get("id", "")
+
+        first_in = record["first_in_time"].strftime("%Y-%m-%d %H:%M:%S") if record.get("first_in_time") else ""
+        last_out = record["last_out_time"].strftime("%Y-%m-%d %H:%M:%S") if record.get("last_out_time") else ""
+
+        # Nama device dari DB
+        device_in_raw = record.get("reader_name_in", "")
+        device_out_raw = record.get("reader_name_out", "")
+
+        # Zona hijau/merah
+        hijauin, merahin = get_zona_from_device(device_in_raw, "IN_DEVICES_HIJAU", "IN_DEVICES_MERAH")
+        hijauout, merahout = get_zona_from_device(device_out_raw, "OUT_DEVICES_HIJAU", "OUT_DEVICES_MERAH")
+
+        # Pemetaan nama device
+        device_in_hijau = match_device_name(hijauin, device_pos_list)
+        device_in_merah = match_device_name(merahin, device_pos_list)
+        device_out_hijau = match_device_name(hijauout, device_pos_list)
+        device_out_merah = match_device_name(merahout, device_pos_list)
+
+        # Ambil data tambahan dari pers_attribute_ext
+        attr_values = get_attribute_values(conn, person_id, attr_names)
+
+        # Ambil nilai-nilai spesifik dari attr_values sesuai urutan
+        nip = attr_values.get(attr_names[0], "") if len(attr_names) > 0 else ""
+        jenis_pekerjaan = attr_values.get(attr_names[1], "") if len(attr_names) > 1 else ""
+        jabatan = attr_values.get(attr_names[2], "") if len(attr_names) > 2 else ""
+        no_po = attr_values.get(attr_names[3], "") if len(attr_names) > 3 else ""
+
+        # Tulis ke worksheet
+        ws.append([
+            no,
+            dept_name, name, nip,
+            jabatan, jenis_pekerjaan, first_in,
+            device_in_hijau, device_in_merah,
+            last_out,
+            device_out_hijau, device_out_merah,
+            no_po, ""
+        ])
+
+        # Format cell
+        for cell in next(ws.iter_rows(min_row=row_num, max_row=row_num, min_col=1, max_col=14)):
+            cell.alignment = align_center
+            cell.border = border
+
+        row_num += 1
+        no += 1
+
+    return row_num
+
+def auto_adjust_column_width(ws, start_row=12, min_width=20):
+    column_widths = {}
+
+    for row in ws.iter_rows(min_row=start_row, values_only=True):
+        for i, cell_value in enumerate(row, 1):
+            if cell_value is None:
+                continue
+            length = len(str(cell_value))
+            if i not in column_widths:
+                column_widths[i] = length
+            else:
+                if length > column_widths[i]:
+                    column_widths[i] = length
+
+    max_col = ws.max_column
+    for col_idx in range(1, max_col + 1):
+        width = column_widths.get(col_idx, 0)
+        final_width = max(width + 2, min_width)
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = final_width
+
+def register_routes(app):
+    token = os.getenv("ACCESS_TOKEN")
+    url_add = os.getenv("URL_ADD_PERSON")
+    title_hijau = os.getenv("TITLE_HIJAU", "MONITORING ZONA HIJAU")
+    title_merah = os.getenv("TITLE_MERAH", "MONITORING ZONA MERAH")
+    title_all = os.getenv("TITLE_ALL", "MONITORING SEMUA ZONA")
+    transaksi_title = os.getenv("TRANSAKSI_TITLE", "Riwayat Transaksi PLN Indonesia Power")
+
+    def get_conn():
+        return psycopg2.connect(dsn=os.getenv("DATABASE_URL"))
+
+    ZONA_HIJAU = [z.strip().lower() for z in os.getenv("ZONA_HIJAU", "").split(",")]
+    ZONA_MERAH = [z.strip().lower() for z in os.getenv("ZONA_MERAH", "").split(",")]
+
+    def is_zona(name, zone_list):
+        name = (name or "").lower()
+        return any(z in name for z in zone_list)
+
+    # == Tambahkan route ini di bawah semua route lain ==
+    @app.route('/export')
+    def export():
+        conn = get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        from_date = request.args.get("from")
+        to_date = request.args.get("to")
+        nama = request.args.get("nama", "")
+        dept = request.args.get("dept", "")
+        pin = request.args.get("id", "")
+
+        if not from_date or not to_date:
+            return {"error": "Parameter 'from' dan 'to' harus diisi."}, 400
+
+        query = "SELECT * FROM acc_firstin_lastout WHERE update_time BETWEEN %s AND %s"
+        params = [from_date, to_date]
+
+        if pin:
+            query += " AND pin ILIKE %s"
+            params.append(f"%{pin}%")
+        if nama:
+            query += " AND name ILIKE %s"
+            params.append(f"%{nama}%")
+        if dept:
+            query += " AND dept_name ILIKE %s"
+            params.append(f"%{dept}%")
+
+        query += " ORDER BY first_in_time NULLS LAST"
+        cur.execute(query, tuple(params))
+        records = cur.fetchall()
+
+        wb = Workbook()
+        ws = wb.active
+        tahun = datetime.now().year
+
+        if not records:
+            logger.info(f"Export kosong dari {request.remote_addr}: {from_date} - {to_date}, filter={nama or pin or dept}")
+            return {"error": "Data tidak ditemukan dalam rentang waktu tersebut."}, 404
+
+        logger.info(f"Export berhasil oleh {request.remote_addr}: {len(records)} data dari {from_date} ke {to_date}, filter={nama or pin or dept}")
+
+        apply_excel_header(ws, tahun)
+        write_excel_data(ws, records, conn)
+        auto_adjust_column_width(ws)
+
+        ip_logo_path = os.getenv("EXCEL_LOGO_KIRI")
+        ipp_logo_path = os.getenv("EXCEL_LOGO_KANAN")
+
+        if ip_logo_path and os.path.exists(ip_logo_path):
+            img = XLImage(ip_logo_path)
+            img.height = 50
+            img.anchor = 'A2'
+            ws.add_image(img)
+
+        if ipp_logo_path and os.path.exists(ipp_logo_path):
+            img2 = XLImage(ipp_logo_path)
+            img2.height = 40
+            img2.anchor = 'H2'
+            ws.add_image(img2)
+
+        virtual_file = io.BytesIO()
+
+        try:
+            wb.save(virtual_file)
+        except Exception as e:
+            logger.error(f"Gagal menyimpan file Excel: {e}")
+            return {"error": "Gagal menyimpan file."}, 500
+
+        virtual_file.seek(0)
+        file_name = f"transaction_plnn_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(
+            virtual_file,
+            as_attachment=True,
+            download_name=file_name,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+
+    @app.context_processor
+    def inject_now():
+        return {'current_year': datetime.now().year}
+
+    # ─── Error Handler ─────────────────
+    @app.errorhandler(404)
+    def page_not_found(e):
+        return render_template("errors/404.html"), 404
+
+    @app.errorhandler(500)
+    def internal_server_error(e):
+        return render_template("errors/500.html"), 500
+
+    # ─── Zona View ─────────────────────
+    @app.route("/")
+    def zona_hijau():
+        return render_template("index.html", title=title_hijau, zone="hijau")
+
+    @app.route("/merah")
+    def zona_merah():
+        return render_template("index.html", title=title_merah, zone="merah")
+
+    @app.route("/all")
+    def zona_all():
+        return render_template("all/index.html", title=title_all, zone="all")
+
+    @app.route("/transaksi")
+    def transaksi():
+        return render_template("transaksi/index.html", title=transaksi_title)
+
+    # ─── API Zone Data ─────────────────
+    @app.route("/api/data")
+    def api_data():
+        return jsonify(get_zone_data("hijau"))
+
+    @app.route("/api/merah")
+    def api_merah():
+        return jsonify(get_zone_data("merah"))
+
+    @app.route("/api/blacklist")
+    def api_blacklist():
+        return jsonify(BlacklistTracker().run())
+
+    @app.route("/api/all")
+    def api_all():
+        data_hijau = get_zone_data("hijau")
+        data_merah = get_zone_data("merah")
+
+        return jsonify({
+            "hijau": data_hijau,
+            "merah": data_merah
+        })
+
+    @app.route("/api/transaksi")
+    def api_transaksi():
+        id_ = request.args.get("id", "")
+        nama = request.args.get("nama", "")
+        dept = request.args.get("dept", "")
+        dari = request.args.get("dari", "")
+        ke = request.args.get("ke", "")
+        page = int(request.args.get("page", 1))
+        per_page = 50
+
+        if not dari or not ke:
+            now = datetime.now()
+            dari = now.strftime("%Y-%m-%dT00:00:00")
+            ke = now.strftime("%Y-%m-%dT23:59:59")
+
+        result, total = get_transaksi_filtered(id_, nama, dept, dari, ke, page, per_page)
+
+        return jsonify({
+            "total": total,
+            "per_page": per_page,
+            "page": page,
+            "rows": result
+        })
+
+    @app.route("/search_person")
+    def search_person():
+        term = request.args.get("q", "").strip()
+        if not term:
+            return jsonify([])
+
+        conn = get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        cur.execute("""
+            SELECT p.name AS person_name, p.pin, d.name AS dept_name
+            FROM pers_person p
+            JOIN auth_department d ON p.auth_dept_id = d.id
+            WHERE p.name ILIKE %s OR CAST(p.pin AS TEXT) ILIKE %s
+            ORDER BY p.name
+            LIMIT 10
+        """, (f"%{term}%", f"%{term}%"))
+
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        results = [
+            {
+                "name": row["person_name"],
+                "pin": row["pin"],
+                "dept_name": row["dept_name"]
+            }
+            for row in rows
+        ]
+        return jsonify(results)
+
+
+    @app.route("/register_visitor", methods=["GET", "POST"])
+    def register_visitor():
+        if request.method == "POST":
+            try:
+                certNum = request.form.get("certNum", "").strip()
+                company = request.form.get("company", "").strip()
+                startTime = request.form.get("startTime", "").strip()
+                endTime = request.form.get("endTime", "").strip()
+                persPersonPin = request.form.get("persPersonPin", "").strip()  # hasil dari select2
+                visEmpName = request.form.get("visEmpName", "").strip()
+                # visitEmpPhone = request.form.get("visitEmpPhone", "").strip()
+                visitReason = request.form.get("visitReason", "").strip()
+
+                file = request.files.get("facePhoto")
+                if not file or not allowed_file(file.filename):
+                    flash("File foto tidak valid (hanya .jpg/.png)", "danger")
+                    return redirect(url_for("register_visitor"))
+
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+                file.save(filepath)
+
+                with open(filepath, "rb") as f:
+                    encoded_photo = base64.b64encode(f.read()).decode()
+
+                payload = {
+                    "cardNo": "",
+                    "certNum": certNum,
+                    "certType": 1,
+                    "company": company,
+                    "startTime": startTime,
+                    "endTime": endTime,
+                    "persPersonPin": persPersonPin,
+                    "visEmpName": visEmpName,
+                    "visLevels": "1",
+                    "visitEmpPhone": "",
+                    "visitReason": visitReason,
+                    "visitorCount": 1,
+                    "facePhoto": encoded_photo
+                }
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+
+                url_visitor = f"https://localhost:8098/api/visRegistration/add?access_token={token}"
+
+                response = requests.post(
+                    url_visitor,
+                    json=payload,
+                    headers=headers,
+                    verify=False,
+                    timeout=10
+                )
+
+                data = response.json()
+                msg = data.get("message", "") or data.get("status", "")
+
+                if msg.lower() == "success":
+                    flash("Registrasi visitor berhasil", "success")
+                else:
+                    flash(f"Registrasi visitor gagal: {msg}", "danger")
+
+            except Exception:
+                flash("Terjadi kesalahan saat memproses data visitor", "danger")
+                app.logger.exception("Register visitor error:")
+
+            return redirect(url_for("register_visitor"))
+
+        return render_template("register_visitor.html")
+
+    # ─── Register Form ─────────────────
+    @app.route("/register", methods=["GET", "POST"])
+    def register():
+        departments = get_departments()
+        if not departments:
+            return render_template("register.html", offline=True)
+
+        if request.method == "POST":
+            try:
+                name = request.form.get("name", "").strip().upper()
+                dept = request.form.get("dept", "").strip().upper()
+                plat = request.form.get("plat", "").strip().upper()
+                gender = request.form.get("gender", "M")
+
+                file = request.files.get("filename")
+                if not file or not allowed_file(file.filename):
+                    flash("File tidak valid (hanya .jpg/.png)", "danger")
+                    return redirect(url_for("register"))
+
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+                file.save(filepath)
+
+                with open(filepath, "rb") as f:
+                    encoded = base64.b64encode(f.read()).decode()
+
+                pin = str(int(time.time() * 1000))[-8:]
+
+                payload = {
+                    "name": name,
+                    "pin": pin,
+                    "deptCode": dept,
+                    "gender": gender,
+                    "carPlate": plat,
+                    "personPhoto": encoded,
+                    "accLevelIds": "1",
+                    "certType": 2,
+                    "ssn": "111111",
+                    "isDisabled": False,
+                    "isSendMail": False
+                }
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+
+                response = requests.post(
+                    f"{url_add}?access_token={token}",
+                    json=payload,
+                    headers=headers,
+                    verify=False,
+                    timeout=10
+                )
+
+                data = response.json()
+                msg = data.get("message", "Gagal")
+
+                if msg == "success":
+                    flash("Registrasi berhasil", "success")
+
+                    attr_names = os.getenv("ATTRIBUT_REGISTER", "").split(",")
+                    attr_names = [a.strip() for a in attr_names if a.strip()]
+
+                    if attr_names:
+                        conn = get_conn()
+                        cur = conn.cursor()
+
+                        cur.execute("SELECT id FROM pers_person WHERE pin = %s LIMIT 1", (pin,))
+                        person = cur.fetchone()
+                        if not person:
+                            app.logger.warning(f"Person ID dengan PIN {pin} tidak ditemukan.")
+                            cur.close()
+                            conn.close()
+                            return redirect(url_for("register"))
+
+                        person_id = person[0]
+
+                        # Ambil attr_name dan filed_index dari tabel pers_attribute
+                        cur.execute("SELECT attr_name, filed_index FROM pers_attribute")
+                        attr_map = {row[0].strip().upper(): row[1] for row in cur.fetchall() if row[0]}
+
+                        for attr_name in attr_names:
+                            form_key = attr_name.lower().replace(" ", "_")
+                            value = request.form.get(form_key, "").strip()
+                            if not value:
+                                continue
+
+                            filed_index = attr_map.get(attr_name.upper())
+                            if filed_index is None:
+                                app.logger.warning(f"Attribute '{attr_name}' tidak ditemukan di pers_attribute.")
+                                continue
+
+                            column_name = f"attr_value{filed_index}"
+
+                            update_query = f"""
+                                UPDATE pers_attribute_ext
+                                SET "{column_name}" = %s
+                                WHERE person_id = %s
+                            """
+                            cur.execute(update_query, (value, person_id))
+
+                        conn.commit()
+                        cur.close()
+                        conn.close()
+
+                else:
+                    flash(f"Registrasi gagal: {msg}", "danger")
+
+            except Exception:
+                flash("Terjadi kesalahan saat memproses data", "danger")
+                app.logger.exception("Register error:")
+
+            return redirect(url_for("register"))
+
+        # GET: render form + extra fields
+        extra_fields = [f.strip().upper() for f in os.getenv("ATTRIBUT_REGISTER", "").split(",") if f.strip()]
+        return render_template("register.html", departments=departments, extra_fields=extra_fields)

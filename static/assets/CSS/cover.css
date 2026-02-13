@@ -1,0 +1,22 @@
+.bolded{
+    font-weight:bold;
+}
+.bg-cover{
+    position: relative;
+    height: auto;
+    width: 100%;
+    font-weight:bold;
+}
+.bg-cover::before {
+    content: "";
+    background-image: url(assets/images/bg.jpg);
+    background-size: contain;
+    background-repeat: no-repeat;
+    position: absolute;
+    top: 0px;
+    right: 0px;
+    bottom: 0px;
+    left: 0px;
+    opacity: 0.15;
+    background-position: center;
+}

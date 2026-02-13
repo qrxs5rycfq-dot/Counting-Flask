@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ title or "Counting People" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='plugins/bootstrap/bootstrap.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .table th, .table td {
+      white-space: normal !important;
+      word-wrap: break-word;
+      color: #000 !important;
+    }
+
+    .table thead th {
+      vertical-align: middle;
+      text-align: center;
+    }
+
+    .table-responsive {
+      overflow-x: auto;
+    }
+
+    .table td {
+      vertical-align: middle;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    .table {
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    .watermark {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0.2;
+      font-size: 22px;
+      color: #000;
+      font-weight: 700;
+      z-index: 9999;
+      pointer-events: none;
+    }
+
+    .watermark img {
+      height: 700px;
+      max-width: 90vw;
+      opacity: 0.5;
+    }
+
+    .watermark:hover {
+      opacity: 0.4;
+      transition: opacity 0.3s ease;
+    }
+
+    @media (max-width: 768px) {
+        .watermark img {
+            height: 40vh;
+        }
+    }
+  </style>
+
+  <link rel="shortcut icon" href="{{ url_for('static', filename='images/fav.png') }}">
+
+  <!-- jQuery -->
+  <script src="{{ url_for('static', filename='assets/js/jquery-3.6.1.min.js') }}"></script>
+</head>
+<body data-zone="{{ zone }}">
+  <div class="body-wrapper">
+    <!-- Header -->
+    <!-- Header Navbar -->
+    <nav class="navbar navbar-light bg-white border-bottom px-3 shadow-sm">
+      <a class="navbar-brand" href="#">
+        <img src="{{ url_for('static', filename='images/logo-ip3.png') }}" alt="Logo IP3" height="40">
+      </a>
+      <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav"
+        aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+        <ul class="navbar-nav text-center">
+          <li class="nav-item">
+            <a class="nav-link text-dark" href="/"><strong>ZONA HIJAU</strong></a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link text-dark" href="/merah"><strong>ZONA MERAH</strong></a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link text-dark" href="/all"><strong>SEMUA ZONA</strong></a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link text-dark" href="/transaksi"><strong>TRANSAKSI</strong></a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link text-dark" href="/register"><strong>REGISTRASI PERSONAL</strong></a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link text-dark" href="/register_visitor"><strong>REGISTRASI VISITOR</strong></a>
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <!-- Judul -->
+    <div class="container-fluid">
+      <div class="row no-gutters mt-1">
+        <div class="col-12 text-center">
+          <h2 class="font-weight-bold mb-1">{{ title or "Counting People" }}</h2>
+        </div>
+      </div>
+    </div>
+
+    <!-- Waktu -->
+    <div class="row no-gutters mt-1 px-2">
+      <div class="col-12">
+        <div class="card border-success bg-info text-center pt-1">
+          <h4 class="text-white font-weight-bold">
+            <span id="tanggalwaktu"></span> /
+            <span id="jam"></span>:<span id="menit"></span>:<span id="detik"></span> WIB
+          </h4>
+        </div>
+      </div>
+    </div>
+
+    <!-- IN / CURRENT / OUT -->
+    <div class="container-fluid">
+      <div class="row no-gutters p-1">
+        <div class="col-md-4 p-1">
+          <div class="card border-success bg-success text-center">
+            <img src="{{ url_for('static', filename='images/person_white.png') }}" width="100" class="mx-auto d-block" alt="IN Icon">
+            <h2 class="text-white font-weight-bold" id="totalin">0</h2>
+            <h5 class="text-white font-weight-bold">MASUK</h5>
+          </div>
+        </div>
+        <div class="col-md-4 p-1">
+          <div class="card border-success bg-primary text-center">
+            <img src="{{ url_for('static', filename='images/person_white.png') }}" width="100" class="mx-auto d-block" alt="CURRENT Icon">
+            <h2 class="text-white font-weight-bold" id="totalcur">0</h2>
+            <h5 class="text-white font-weight-bold">DI DALAM</h5>
+          </div>
+        </div>
+        <div class="col-md-4 p-1">
+          <div class="card border-success bg-danger text-center">
+            <img src="{{ url_for('static', filename='images/person_white.png') }}" width="100" class="mx-auto d-block" alt="OUT Icon">
+            <h2 class="text-white font-weight-bold" id="totalout">0</h2>
+            <h5 class="text-white font-weight-bold">KELUAR</h5>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabel -->
+    <div class="container-fluid">
+      <div class="card-body">
+        <div id="offline-alert" class="alert alert-danger text-center" style="display: none;">
+          🔴 Server sedang offline. Data tidak dapat diambil.
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-borderless table-striped text-center bg-cover">
+            <thead class="thead-light">
+              <tr id="dept-table-header" class="text-center align-middle">
+                <!-- Akan diisi JS -->
+              </tr>
+            </thead>
+            <tbody id="dept-table">
+              <!-- Diisi oleh JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Watermark -->
+  <div class="watermark">
+    <img src="{{ url_for('static', filename='images/SMOOHT.png') }}" alt="OTI">
+  </div>
+
+  <!-- Script -->
+  <script src="{{ url_for('static', filename='js/data.js') }}"></script>
+  <script src="{{ url_for('static', filename='plugins/bootstrap/bootstrap.min.js') }}"></script>
+</body>
+</html>

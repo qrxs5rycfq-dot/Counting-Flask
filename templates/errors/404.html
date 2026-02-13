@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>404 - Halaman Tidak Ditemukan</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      --bg: #f9fafb;
+      --primary: #1f2937;
+      --accent: #3b82f6;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--primary);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      text-align: center;
+      padding: 1rem;
+    }
+
+    h1 {
+      font-size: 6rem;
+      font-weight: bold;
+      color: var(--accent);
+    }
+
+    p {
+      font-size: 1.25rem;
+      margin-top: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    a {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background-color: var(--accent);
+      color: white;
+      border-radius: 0.5rem;
+      text-decoration: none;
+      transition: background-color 0.3s ease;
+    }
+
+    a:hover {
+      background-color: #2563eb;
+    }
+
+    @media (max-width: 600px) {
+      h1 {
+        font-size: 4rem;
+      }
+      p {
+        font-size: 1rem;
+      }
+    }
+
+    .watermark {
+      position: fixed;
+      bottom: 10px;
+      left: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0.25;
+      font-size: 14px;
+      color: #000;
+      font-weight: 600;
+      z-index: 9999;
+      pointer-events: none;
+    }
+
+    .watermark img {
+      height: 30px;
+      opacity: 0.5;
+    }
+
+    .watermark:hover {
+      opacity: 0.5;
+      transition: opacity 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <h1>404</h1>
+  <p>Oops! Halaman yang kamu cari tidak ditemukan.</p>
+  <a href="{{ url_for('zona_hijau') }}">← Kembali ke Beranda</a>
+
+  <!-- Watermark -->
+  <div class="watermark">
+    <img src="{{ url_for('static', filename='images/app.ico') }}" alt="OTI">
+    <span>OME TEKNOLOGI INDONESIA</span>
+  </div>
+</body>
+</html>

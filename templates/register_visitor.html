@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Visitor Registration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Bootstrap 5 -->
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/select2.min.css') }}" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='flatpickr/flatpickr.min.css') }}">
+  <script src="{{ url_for('static', filename='js/sweetalert2.js') }}"></script>
+
+  <style>
+    body {
+      background-color: #f4f6f9;
+    }
+
+    .container {
+      max-width: 600px;
+      margin-top: 30px;
+      margin-bottom: 50px;
+      padding: 30px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      font-weight: 600;
+    }
+
+    #preview {
+      max-height: 200px;
+      object-fit: cover;
+      margin-top: 10px;
+      border-radius: 10px;
+    }
+
+    /* Modern Style for Select2 Dropdown */
+    .select2-container--default .select2-selection--single {
+      height: 45px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid #ced4da;
+      box-shadow: none;
+      font-size: 14px;
+    }
+
+    .select2-container--default .select2-results > .select2-results__options {
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    .select2-container--default .select2-results__option {
+      padding: 10px;
+      font-size: 14px;
+      border-bottom: 1px solid #f1f1f1;
+      transition: background-color 0.2s ease;
+    }
+
+    .select2-container--default .select2-results__option--highlighted[aria-selected] {
+      background-color: #0d6efd;
+      color: white;
+    }
+
+    .select2-container--default .select2-selection--single .select2-selection__rendered {
+      line-height: 28px;
+    }
+
+    .select2-container--default .select2-selection__arrow {
+      height: 45px;
+      right: 8px;
+    }
+
+    .watermark {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0.2;
+      font-size: 22px;
+      color: #000;
+      font-weight: 700;
+      z-index: 9999;
+      pointer-events: none;
+    }
+
+    .watermark img {
+      height: 700px;
+      max-width: 90vw;
+      opacity: 0.5;
+    }
+
+    .watermark:hover {
+      opacity: 0.4;
+      transition: opacity 0.3s ease;
+    }
+
+    @media (max-width: 768px) {
+        .watermark img {
+            height: 40vh;
+        }
+    }
+  </style>
+
+  <script>
+    const Toast = Swal.mixin({
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false,
+      timer: 3000,
+      timerProgressBar: true,
+      didOpen: toast => {
+        toast.addEventListener('mouseenter', Swal.stopTimer)
+        toast.addEventListener('mouseleave', Swal.resumeTimer)
+      }
+    });
+
+    function previewImage(event) {
+      const input = event.target;
+      const reader = new FileReader();
+
+      reader.onload = function () {
+        const preview = document.getElementById('preview');
+        preview.src = reader.result;
+        preview.style.display = 'block';
+      }
+
+      if (input.files && input.files[0]) {
+        reader.readAsDataURL(input.files[0]);
+      }
+    }
+  </script>
+</head>
+<body>
+
+  <div class="container">
+    <img src="{{ url_for('static', filename='images/logo-ip4.png') }}" class="img-fluid mx-auto d-block mb-4" style="max-height: 100px;" alt="Indonesia Power" />
+    <div class="title">Visitor Registration Form</div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <script>
+          {% for category, message in messages %}
+            Toast.fire({ icon: '{{ category }}', title: '{{ message }}' });
+          {% endfor %}
+        </script>
+      {% endif %}
+    {% endwith %}
+
+    {% if offline %}
+      <div class="alert alert-danger text-center fw-bold" role="alert">
+        Server sedang offline. Silakan coba beberapa saat lagi.
+      </div>
+    {% endif %}
+
+    {% if not offline %}
+      <form action="{{ url_for('register_visitor') }}" method="POST" enctype="multipart/form-data">
+        <div class="mb-3">
+          <label class="form-label">Certificate Number (KTP)</label>
+          <input type="text" class="form-control" name="certNum" required>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Company</label>
+          <input type="text" class="form-control" name="company" required onkeyup="this.value = this.value.toUpperCase()">
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label">Start Time</label>
+            <input type="text" id="dari" name="startTime" class="form-control" placeholder="YYYY-MM-DD" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">End Time</label>
+            <input type="text" id="ke" name="endTime" class="form-control" placeholder="YYYY-MM-DD" required>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Host Name</label>
+          <select id="persPersonPin" name="persPersonPin" class="form-select" required></select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Visitor Employee Name</label>
+          <input type="text" class="form-control" name="visEmpName" required onkeyup="this.value = this.value.toUpperCase()">
+        </div>
+
+        <!-- <div class="mb-3">
+          <label class="form-label">Visitor Employee Phone</label>
+          <input type="tel" class="form-control" name="visitEmpPhone" required>
+        </div> -->
+
+        <div class="mb-3">
+          <label class="form-label">Visit Reason</label>
+          <input type="text" class="form-control" name="visitReason" required>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Upload Face Photo</label>
+          <input type="file" class="form-control" name="facePhoto" accept="image/*" onchange="previewImage(event)" required>
+          <img id="preview" class="img-fluid mt-2" style="display:none;" />
+        </div>
+
+        <div class="d-grid mt-4">
+          <button type="submit" class="btn btn-primary btn-lg">Register Visitor</button>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+
+  <!-- Watermark -->
+  <div class="watermark">
+    <img src="{{ url_for('static', filename='images/SMOOHT.png') }}" alt="OTI">
+  </div>
+
+  <script src="{{ url_for('static', filename='js/jquery-3.6.0.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/select2.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='flatpickr/flatpickr.min.js') }}"></script>
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      const startDate = new Date();
+      startDate.setHours(0, 0, 0, 0); // Hari ini 00:00:00
+
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 1); // Besok
+      endDate.setHours(23, 59, 59, 0); // Besok 23:59:59
+
+      flatpickr("#dari", {
+        enableTime: false, // Hide jam di UI
+        dateFormat: "Y-m-d",
+        defaultDate: startDate
+      });
+
+      flatpickr("#ke", {
+        enableTime: false, // Hide jam di UI
+        dateFormat: "Y-m-d",
+        defaultDate: endDate
+      });
+
+      // Saat submit, tambahkan jam otomatis
+      document.querySelector("form").addEventListener("submit", function () {
+        const dari = document.querySelector("#dari");
+        const ke = document.querySelector("#ke");
+
+        dari.value = dari.value + " 00:00:00";
+        ke.value = ke.value + " 23:59:59";
+      });
+    });
+
+    $('#persPersonPin').select2({
+      placeholder: 'Cari nama atau PIN...',
+      ajax: {
+        url: '/search_person',
+        dataType: 'json',
+        delay: 250,
+        data: function (params) {
+          return { q: params.term };
+        },
+        processResults: function (data) {
+          return {
+            results: data.map(function (item) {
+              return {
+                id: item.pin,
+                text: item.pin,
+                name: item.name,
+                dept_name: item.dept_name,
+                pin: item.pin
+              };
+            })
+          };
+        }
+      },
+      minimumInputLength: 1,
+      templateResult: function (repo) {
+        if (repo.loading) return repo.text;
+        return $('<div><strong>' + repo.name + '</strong><br><small>' + repo.dept_name + ' (' + repo.pin + ')</small></div>');
+      },
+      templateSelection: function (repo) {
+          if (repo.pin && repo.name) {
+              return repo.pin + ' - ' + repo.name;
+          }
+          return repo.text || '';
+      }
+    });
+  </script>
+</body>
+</html>

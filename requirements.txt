@@ -1,0 +1,15 @@
+Flask
+waitress
+python-dotenv
+schedule
+psycopg2-binary
+requests
+urllib3
+SQLAlchemy
+aiohttp
+aioschedule
+sqlalchemy[asyncio]
+asyncpg
+openpyxl
+python-dateutil
+pillow
