@@ -13,7 +13,7 @@
     html, body {
       height: 100%;
       margin: 0;
-      background-color: #f8f9fa;
+      background-color: #f0f2f5;
     }
 
     .navbar-toggler { border: none; display: block !important; }
@@ -24,7 +24,7 @@
     .card {
       border: none;
       border-radius: 1rem;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07);
     }
 
     .form-label { font-weight: 500; }
@@ -33,7 +33,7 @@
       min-width: 120px;
       transition: all 0.3s ease-in-out;
     }
-    .btn:hover { transform: scale(1.05); }
+    .btn:hover { transform: scale(1.03); }
 
     .fade-in {
       animation: fadeIn 0.6s ease-in-out;
@@ -98,16 +98,28 @@
     .chart-container {
       position: relative;
       width: 100%;
-      max-height: 500px;
+      height: 400px;
+      min-height: 350px;
     }
 
-    .summary-cards .card-body {
-      padding: 1rem;
+    .summary-card {
+      border-radius: 1rem;
+      padding: 1.2rem 0.8rem;
+      text-align: center;
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+      transition: transform 0.2s;
     }
+    .summary-card:hover { transform: translateY(-3px); }
+    .summary-card h6 { font-size: 0.85rem; margin-bottom: 0.3rem; opacity: 0.9; }
+    .summary-card .num { font-size: 2rem; font-weight: 800; }
 
-    .summary-cards .card {
-      border-radius: 0.75rem;
-    }
+    .bg-pos1-in  { background: linear-gradient(135deg, #28a745, #20c997); }
+    .bg-pos1-out { background: linear-gradient(135deg, #6c757d, #adb5bd); }
+    .bg-pos1-cur { background: linear-gradient(135deg, #0d6efd, #6ea8fe); }
+    .bg-pos2-in  { background: linear-gradient(135deg, #dc3545, #e35d6a); }
+    .bg-pos2-out { background: linear-gradient(135deg, #fd7e14, #ffc107); }
+    .bg-pos2-cur { background: linear-gradient(135deg, #0dcaf0, #6edff6); }
 
     .watermark {
       position: fixed; top: 50%; left: 50%;
@@ -123,6 +135,7 @@
 
     @media (max-width: 768px) {
       .watermark img { height: 40vh; }
+      .chart-container { height: 300px; min-height: 250px; }
     }
 
     .table th { background-color: #f1f1f1; }
@@ -194,60 +207,65 @@
           </form>
 
           <!-- Summary Cards -->
-          <div class="row summary-cards mb-4" id="summary-cards" style="display:none;">
-            <div class="col-md-2 mb-2">
-              <div class="card bg-success text-white text-center">
-                <div class="card-body">
-                  <h6>POS 1 - MASUK</h6>
-                  <h3 class="fw-bold" id="sum-pos1-in">0</h3>
-                </div>
+          <div class="row g-3 mb-4" id="summary-cards" style="display:none;">
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos1-in">
+                <h6>POS 1 — MASUK</h6>
+                <div class="num" id="sum-pos1-in">0</div>
               </div>
             </div>
-            <div class="col-md-2 mb-2">
-              <div class="card bg-secondary text-white text-center">
-                <div class="card-body">
-                  <h6>POS 1 - KELUAR</h6>
-                  <h3 class="fw-bold" id="sum-pos1-out">0</h3>
-                </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos1-out">
+                <h6>POS 1 — KELUAR</h6>
+                <div class="num" id="sum-pos1-out">0</div>
               </div>
             </div>
-            <div class="col-md-2 mb-2">
-              <div class="card bg-primary text-white text-center">
-                <div class="card-body">
-                  <h6>POS 1 - DI DALAM</h6>
-                  <h3 class="fw-bold" id="sum-pos1-cur">0</h3>
-                </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos1-cur">
+                <h6>POS 1 — DI DALAM</h6>
+                <div class="num" id="sum-pos1-cur">0</div>
               </div>
             </div>
-            <div class="col-md-2 mb-2">
-              <div class="card bg-danger text-white text-center">
-                <div class="card-body">
-                  <h6>POS 2 - MASUK</h6>
-                  <h3 class="fw-bold" id="sum-pos2-in">0</h3>
-                </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos2-in">
+                <h6>POS 2 — MASUK</h6>
+                <div class="num" id="sum-pos2-in">0</div>
               </div>
             </div>
-            <div class="col-md-2 mb-2">
-              <div class="card bg-warning text-dark text-center">
-                <div class="card-body">
-                  <h6>POS 2 - KELUAR</h6>
-                  <h3 class="fw-bold" id="sum-pos2-out">0</h3>
-                </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos2-out">
+                <h6>POS 2 — KELUAR</h6>
+                <div class="num" id="sum-pos2-out">0</div>
               </div>
             </div>
-            <div class="col-md-2 mb-2">
-              <div class="card bg-info text-white text-center">
-                <div class="card-body">
-                  <h6>POS 2 - DI DALAM</h6>
-                  <h3 class="fw-bold" id="sum-pos2-cur">0</h3>
-                </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos2-cur">
+                <h6>POS 2 — DI DALAM</h6>
+                <div class="num" id="sum-pos2-cur">0</div>
               </div>
             </div>
           </div>
 
-          <!-- Chart -->
-          <div class="chart-container mb-4">
-            <canvas id="grafikChart"></canvas>
+          <!-- Charts: POS 1 and POS 2 side by side -->
+          <div class="row g-3 mb-4" id="chart-row" style="display:none;">
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-body">
+                  <div class="chart-container">
+                    <canvas id="chartPos1"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-body">
+                  <div class="chart-container">
+                    <canvas id="chartPos2"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Department Table -->
@@ -270,7 +288,7 @@
                 </tr>
               </thead>
               <tbody id="dept-body">
-                <tr><td colspan="7" class="text-center text-muted">Pilih tanggal dan klik Tampilkan</td></tr>
+                <tr><td colspan="7" class="text-center text-muted">Memuat data...</td></tr>
               </tbody>
               <tfoot id="dept-foot" style="display:none;">
                 <tr class="fw-bold">
@@ -301,9 +319,11 @@
 <script src="{{ url_for('static', filename='flatpickr/flatpickr.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 
 <script>
-  let chartInstance = null;
+  let chartPos1 = null;
+  let chartPos2 = null;
 
   function formatToSQLDatetime(value) {
     const date = new Date(value);
@@ -337,13 +357,14 @@
       .then(data => {
         if (!data.departments || data.departments.length === 0) {
           deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Data tidak ditemukan</td></tr>';
-          if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+          destroyCharts();
           document.getElementById('summary-cards').style.display = 'none';
+          document.getElementById('chart-row').style.display = 'none';
           document.getElementById('dept-foot').style.display = 'none';
           return;
         }
 
-        // Summary totals (now scalars, not arrays)
+        // Summary cards
         document.getElementById('sum-pos1-in').textContent = data.pos1_in;
         document.getElementById('sum-pos1-out').textContent = data.pos1_out;
         document.getElementById('sum-pos1-cur').textContent = data.pos1_cur;
@@ -375,8 +396,13 @@
         document.getElementById('foot-p2c').textContent = data.pos2_cur;
         document.getElementById('dept-foot').style.display = '';
 
-        // Update chart (grouped by department)
-        renderChart(data);
+        // Charts (wrapped in try-catch so table still shows if Chart.js CDN fails)
+        try {
+          document.getElementById('chart-row').style.display = 'flex';
+          renderCharts(data);
+        } catch (chartErr) {
+          console.warn('Chart rendering failed:', chartErr);
+        }
       })
       .catch(err => {
         console.error(err);
@@ -384,94 +410,151 @@
       });
   }
 
-  function renderChart(data) {
-    const ctx = document.getElementById('grafikChart').getContext('2d');
+  function destroyCharts() {
+    if (chartPos1) { chartPos1.destroy(); chartPos1 = null; }
+    if (chartPos2) { chartPos2.destroy(); chartPos2 = null; }
+  }
 
-    if (chartInstance) {
-      chartInstance.destroy();
-    }
+  function renderCharts(data) {
+    destroyCharts();
 
     const labels = data.departments.map(d => d.dept);
-    const pos1In = data.departments.map(d => d.pos1_in);
-    const pos1Out = data.departments.map(d => d.pos1_out);
-    const pos1Cur = data.departments.map(d => d.pos1_cur);
-    const pos2In = data.departments.map(d => d.pos2_in);
-    const pos2Out = data.departments.map(d => d.pos2_out);
-    const pos2Cur = data.departments.map(d => d.pos2_cur);
 
-    chartInstance = new Chart(ctx, {
+    // ── POS 1 Chart ──
+    chartPos1 = new Chart(document.getElementById('chartPos1').getContext('2d'), {
       type: 'bar',
       data: {
         labels: labels,
         datasets: [
           {
-            label: 'POS 1 Masuk',
-            data: pos1In,
-            backgroundColor: 'rgba(40, 167, 69, 0.7)',
-            borderColor: 'rgba(40, 167, 69, 1)',
-            borderWidth: 1
+            label: 'Masuk',
+            data: data.departments.map(d => d.pos1_in),
+            backgroundColor: 'rgba(40, 167, 69, 0.8)',
+            borderColor: '#28a745',
+            borderWidth: 2,
+            borderRadius: 6,
+            borderSkipped: false
           },
           {
-            label: 'POS 1 Keluar',
-            data: pos1Out,
-            backgroundColor: 'rgba(40, 167, 69, 0.3)',
-            borderColor: 'rgba(40, 167, 69, 0.8)',
-            borderWidth: 1
+            label: 'Keluar',
+            data: data.departments.map(d => d.pos1_out),
+            backgroundColor: 'rgba(108, 117, 125, 0.8)',
+            borderColor: '#6c757d',
+            borderWidth: 2,
+            borderRadius: 6,
+            borderSkipped: false
           },
           {
-            label: 'POS 1 Di Dalam',
-            data: pos1Cur,
-            backgroundColor: 'rgba(25, 135, 84, 0.5)',
-            borderColor: 'rgba(25, 135, 84, 1)',
-            borderWidth: 1
-          },
-          {
-            label: 'POS 2 Masuk',
-            data: pos2In,
-            backgroundColor: 'rgba(220, 53, 69, 0.7)',
-            borderColor: 'rgba(220, 53, 69, 1)',
-            borderWidth: 1
-          },
-          {
-            label: 'POS 2 Keluar',
-            data: pos2Out,
-            backgroundColor: 'rgba(220, 53, 69, 0.3)',
-            borderColor: 'rgba(220, 53, 69, 0.8)',
-            borderWidth: 1
-          },
-          {
-            label: 'POS 2 Di Dalam',
-            data: pos2Cur,
-            backgroundColor: 'rgba(176, 42, 55, 0.5)',
-            borderColor: 'rgba(176, 42, 55, 1)',
-            borderWidth: 1
+            label: 'Di Dalam',
+            data: data.departments.map(d => d.pos1_cur),
+            backgroundColor: 'rgba(13, 110, 253, 0.8)',
+            borderColor: '#0d6efd',
+            borderWidth: 2,
+            borderRadius: 6,
+            borderSkipped: false
           }
         ]
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          title: {
-            display: true,
-            text: 'Grafik Keluar Masuk Per Zona',
-            font: { size: 16 }
+      options: chartOptions('POS 1 — Per Departemen'),
+      plugins: [ChartDataLabels]
+    });
+
+    // ── POS 2 Chart ──
+    chartPos2 = new Chart(document.getElementById('chartPos2').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Masuk',
+            data: data.departments.map(d => d.pos2_in),
+            backgroundColor: 'rgba(220, 53, 69, 0.8)',
+            borderColor: '#dc3545',
+            borderWidth: 2,
+            borderRadius: 6,
+            borderSkipped: false
           },
-          legend: {
-            position: 'top'
+          {
+            label: 'Keluar',
+            data: data.departments.map(d => d.pos2_out),
+            backgroundColor: 'rgba(253, 126, 20, 0.8)',
+            borderColor: '#fd7e14',
+            borderWidth: 2,
+            borderRadius: 6,
+            borderSkipped: false
+          },
+          {
+            label: 'Di Dalam',
+            data: data.departments.map(d => d.pos2_cur),
+            backgroundColor: 'rgba(13, 202, 240, 0.8)',
+            borderColor: '#0dcaf0',
+            borderWidth: 2,
+            borderRadius: 6,
+            borderSkipped: false
+          }
+        ]
+      },
+      options: chartOptions('POS 2 — Per Departemen'),
+      plugins: [ChartDataLabels]
+    });
+  }
+
+  function chartOptions(titleText) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false
+      },
+      plugins: {
+        title: {
+          display: true,
+          text: titleText,
+          font: { size: 15, weight: 'bold' },
+          padding: { bottom: 16 }
+        },
+        legend: {
+          position: 'top',
+          labels: {
+            usePointStyle: true,
+            pointStyle: 'rectRounded',
+            padding: 14,
+            font: { size: 12 }
           }
         },
-        scales: {
-          y: {
-            beginAtZero: true,
-            title: { display: true, text: 'Jumlah Orang' }
-          },
-          x: {
-            title: { display: true, text: 'Departemen' }
+        tooltip: {
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          titleFont: { size: 13 },
+          bodyFont: { size: 12 },
+          cornerRadius: 8,
+          padding: 10
+        },
+        datalabels: {
+          anchor: 'end',
+          align: 'top',
+          font: { weight: 'bold', size: 11 },
+          color: '#333',
+          formatter: function(value) { return value > 0 ? value : ''; }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(0,0,0,0.06)' },
+          ticks: { stepSize: 1, font: { size: 11 } },
+          title: { display: true, text: 'Jumlah Orang', font: { size: 12 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: {
+            font: { size: 10 },
+            maxRotation: 45,
+            minRotation: 0
           }
         }
       }
-    });
+    };
   }
 
   // Export Excel
@@ -559,6 +642,8 @@
       setTimeout(() => {
         splash.style.display = 'none';
         document.getElementById('main-content').style.display = 'block';
+        // Auto-load data on page load (same as zone pages)
+        loadGrafik();
       }, 600);
     }, 1000);
   });
