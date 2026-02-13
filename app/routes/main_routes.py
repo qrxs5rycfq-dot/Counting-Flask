@@ -11,7 +11,7 @@ import re
 import unicodedata
 import psycopg2
 import psycopg2.extras
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from dateutil import parser
 
 from flask import render_template, request, jsonify, redirect, url_for, flash, send_file
@@ -481,10 +481,11 @@ def register_routes(app):
             "rows": result
         })
 
-    def _process_zone_events(events, in_devices, out_devices):
+    def _process_zone_events(events, in_devices, out_devices, prev_events=None):
         """
         Synchronous replica of EventProcessor state-machine logic for one zone.
-        Returns a list of logical in/out events after per-person deduplication.
+        Includes prev_events carry-over logic (same as EventProcessor._prepare_prev_lookup).
+        Returns per_person dict with logical_in, logical_out, current per person.
         """
         in_devs = {d.strip().upper() for d in in_devices}
         out_devs = {d.strip().upper() for d in out_devices}
@@ -507,23 +508,50 @@ def register_routes(app):
             except (ValueError, TypeError, OSError):
                 return None
 
-        # Step 1: collect events per person (same as EventProcessor)
-        per_person = {}
-        for e in events:
-            pin = (e.get("pin") or "").strip()
-            name = (e.get("name") or "").strip()
-            dept = (e.get("dept_name") or "").strip() or "UNKNOWN"
-
+        def resolve_device(e):
             dev_alias = str(e.get("dev_alias") or "").strip().upper()
             event_point_name = str(e.get("event_point_name") or "").strip().upper()
-
             dev = dev_alias
             for reader_dev in (reader_in | reader_out):
                 base_name = reader_dev.replace("-READER", "").strip().upper()
                 if event_point_name == base_name:
                     dev = event_point_name
                     break
+            return dev
 
+        # Step 1: Build prev_lookup (same as EventProcessor._prepare_prev_lookup)
+        prev_lookup = {}
+        if prev_events:
+            for e in prev_events:
+                pin = (e.get("pin") or "").strip()
+                dev = resolve_device(e)
+                time_raw = e.get("event_time")
+                time_str = str(time_raw).strip() if time_raw else ""
+                ts = ts_from_val(time_raw)
+                ev_type = get_type(dev)
+                if not pin or ts is None or not ev_type:
+                    continue
+                # Same time filter as EventProcessor: after 21:00 or before 12:00
+                try:
+                    if isinstance(time_raw, datetime):
+                        dt = time_raw
+                    else:
+                        dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                    if dt.time() >= dt_time(21, 0) or dt.time() <= dt_time(12, 0):
+                        prev_lookup.setdefault(pin, []).append({
+                            "type": ev_type, "ts": ts, "time": time_str
+                        })
+                except (ValueError, TypeError):
+                    continue
+
+        # Step 2: collect today's events per person
+        per_person = {}
+        for e in events:
+            pin = (e.get("pin") or "").strip()
+            name = (e.get("name") or "").strip()
+            dept = (e.get("dept_name") or "").strip() or "UNKNOWN"
+
+            dev = resolve_device(e)
             time_raw = e.get("event_time")
             ts = ts_from_val(time_raw)
             if not pin or not dev or ts is None:
@@ -534,50 +562,75 @@ def register_routes(app):
                 continue
 
             person = per_person.setdefault(pin, {"dept": dept, "name": name, "events": []})
-            person["events"].append({"type": ev_type, "ts": ts, "time": time_raw})
+            person["events"].append({"type": ev_type, "ts": ts, "time": str(time_raw).strip() if time_raw else ""})
 
-        # Step 2: state-machine per person (same logic as EventProcessor)
-        logical_events = []
+        # Step 3: Merge prev_lookup (same as EventProcessor)
+        for pin, prev_evs in prev_lookup.items():
+            if pin in per_person:
+                events_list = per_person[pin]["events"]
+                for prev_ev in prev_evs:
+                    if prev_ev["type"] == "in" and not any(ev["ts"] == prev_ev["ts"] for ev in events_list):
+                        events_list.append(prev_ev)
+                per_person[pin]["events"] = sorted(events_list, key=lambda x: x["ts"])
+            else:
+                in_prev = [ev for ev in prev_evs if ev["type"] == "in"]
+                if in_prev:
+                    best_in = max(in_prev, key=lambda x: x["ts"])
+                    per_person[pin] = {
+                        "dept": "UNKNOWN",
+                        "name": "",
+                        "events": [best_in],
+                    }
+
+        # Step 4: state-machine per person (same logic as EventProcessor)
+        result = {}
         for pin, person in per_person.items():
             events_sorted = sorted(person["events"], key=lambda x: x["ts"])
             status = "outside"
+            logical_in = 0
+            logical_out = 0
+            current = 0
 
             for ev in events_sorted:
                 if ev["type"] == "in" and status == "outside":
                     status = "inside"
-                    logical_events.append({
-                        "dept": person["dept"],
-                        "action": "in",
-                        "time": ev["time"],
-                    })
+                    logical_in += 1
+                    current += 1
                 elif ev["type"] == "out" and status == "inside":
                     status = "outside"
-                    logical_events.append({
-                        "dept": person["dept"],
-                        "action": "out",
-                        "time": ev["time"],
-                    })
+                    logical_out += 1
+                    current -= 1
 
-        return logical_events
+            if logical_in == 0 and logical_out == 0:
+                continue
 
-    def _aggregate_grafik(dari, ke, mode):
+            result[pin] = {
+                "dept": person["dept"],
+                "logical_in": logical_in,
+                "logical_out": logical_out,
+                "current": current,
+            }
+
+        return result
+
+    def _aggregate_grafik(dari, ke):
         """
-        Aggregate entry/exit/current data per period, department, and zone
-        using the same EventProcessor state-machine logic as zone pages.
+        Aggregate entry/exit/current data per department and zone
+        using the same EventProcessor + SummaryBuilder logic as zone pages.
+        Includes previous-day carry-over detection.
         """
         empty = {
-            "labels": [],
-            "pos1_in": [], "pos1_out": [], "pos1_cur": [],
-            "pos2_in": [], "pos2_out": [], "pos2_cur": [],
+            "pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+            "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0,
             "departments": []
         }
         try:
-            events = get_grafik_data(dari, ke)
+            today_events, prev_events = get_grafik_data(dari, ke)
         except Exception as e:
             logger.error(f"Gagal mengambil data grafik: {e}")
             return empty
 
-        if not events:
+        if not today_events and not prev_events:
             return empty
 
         # Device configs (same env vars as tracker_worker)
@@ -586,80 +639,51 @@ def register_routes(app):
         in_merah = [d.strip() for d in os.getenv("IN_DEVICES_MERAH", "").split(",") if d.strip()]
         out_merah = [d.strip() for d in os.getenv("OUT_DEVICES_MERAH", "").split(",") if d.strip()]
 
-        # Process each zone through the state machine
-        pos1_events = _process_zone_events(events, in_hijau, out_hijau)
-        pos2_events = _process_zone_events(events, in_merah, out_merah)
+        # Process each zone through the state machine (with prev_events carry-over)
+        pos1_persons = _process_zone_events(today_events, in_hijau, out_hijau, prev_events)
+        pos2_persons = _process_zone_events(today_events, in_merah, out_merah, prev_events)
 
-        def get_period_label(time_val):
-            try:
-                if isinstance(time_val, datetime):
-                    dt = time_val
-                else:
-                    dt = datetime.strptime(str(time_val).strip(), "%Y-%m-%d %H:%M:%S")
-            except (ValueError, TypeError):
-                return "UNKNOWN"
-            if mode == "week":
-                iso = dt.isocalendar()
-                return f"{iso[0]}-W{iso[1]:02d}"
-            elif mode == "month":
-                return dt.strftime("%Y-%m")
-            else:
-                return dt.strftime("%Y-%m-%d")
-
-        period_agg = {}
+        # Aggregate per department (same as SummaryBuilder.build)
         dept_agg = {}
+        totals = {"pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                  "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0}
 
-        def add_event(zone_prefix, ev):
-            label = get_period_label(ev["time"])
-            dept = ev["dept"]
-            action = ev["action"]
-            key = f"{zone_prefix}_{action}"
-
-            if label not in period_agg:
-                period_agg[label] = {
-                    "pos1_in": 0, "pos1_out": 0,
-                    "pos2_in": 0, "pos2_out": 0,
-                }
-            period_agg[label][key] += 1
-
+        for pin, p in pos1_persons.items():
+            dept = p["dept"]
             if dept not in dept_agg:
-                dept_agg[dept] = {
-                    "pos1_in": 0, "pos1_out": 0,
-                    "pos2_in": 0, "pos2_out": 0,
-                }
-            dept_agg[dept][key] += 1
+                dept_agg[dept] = {"pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                                  "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0}
+            dept_agg[dept]["pos1_in"] += p["logical_in"]
+            dept_agg[dept]["pos1_out"] += p["logical_out"]
+            dept_agg[dept]["pos1_cur"] += p["current"]
+            totals["pos1_in"] += p["logical_in"]
+            totals["pos1_out"] += p["logical_out"]
+            totals["pos1_cur"] += p["current"]
 
-        for ev in pos1_events:
-            add_event("pos1", ev)
-        for ev in pos2_events:
-            add_event("pos2", ev)
-
-        # current (di dalam) = in - out, same as SummaryBuilder
-        for p in period_agg.values():
-            p["pos1_cur"] = max(p["pos1_in"] - p["pos1_out"], 0)
-            p["pos2_cur"] = max(p["pos2_in"] - p["pos2_out"], 0)
-
-        sorted_labels = sorted(period_agg.keys())
+        for pin, p in pos2_persons.items():
+            dept = p["dept"]
+            if dept not in dept_agg:
+                dept_agg[dept] = {"pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                                  "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0}
+            dept_agg[dept]["pos2_in"] += p["logical_in"]
+            dept_agg[dept]["pos2_out"] += p["logical_out"]
+            dept_agg[dept]["pos2_cur"] += p["current"]
+            totals["pos2_in"] += p["logical_in"]
+            totals["pos2_out"] += p["logical_out"]
+            totals["pos2_cur"] += p["current"]
 
         departments = []
         for dept in sorted(dept_agg.keys()):
             d = dept_agg[dept]
             departments.append({
                 "dept": dept,
-                "pos1_in": d["pos1_in"], "pos1_out": d["pos1_out"],
-                "pos1_cur": max(d["pos1_in"] - d["pos1_out"], 0),
-                "pos2_in": d["pos2_in"], "pos2_out": d["pos2_out"],
-                "pos2_cur": max(d["pos2_in"] - d["pos2_out"], 0),
+                "pos1_in": d["pos1_in"], "pos1_out": d["pos1_out"], "pos1_cur": d["pos1_cur"],
+                "pos2_in": d["pos2_in"], "pos2_out": d["pos2_out"], "pos2_cur": d["pos2_cur"],
             })
 
         return {
-            "labels": sorted_labels,
-            "pos1_in": [period_agg[l]["pos1_in"] for l in sorted_labels],
-            "pos1_out": [period_agg[l]["pos1_out"] for l in sorted_labels],
-            "pos1_cur": [period_agg[l]["pos1_cur"] for l in sorted_labels],
-            "pos2_in": [period_agg[l]["pos2_in"] for l in sorted_labels],
-            "pos2_out": [period_agg[l]["pos2_out"] for l in sorted_labels],
-            "pos2_cur": [period_agg[l]["pos2_cur"] for l in sorted_labels],
+            "pos1_in": totals["pos1_in"], "pos1_out": totals["pos1_out"], "pos1_cur": totals["pos1_cur"],
+            "pos2_in": totals["pos2_in"], "pos2_out": totals["pos2_out"], "pos2_cur": totals["pos2_cur"],
             "departments": departments,
         }
 
@@ -667,43 +691,39 @@ def register_routes(app):
     def api_grafik():
         dari = request.args.get("dari", "")
         ke = request.args.get("ke", "")
-        mode = request.args.get("mode", "day")
 
         if not dari or not ke:
             now = datetime.now()
-            dari = now.strftime("%Y-%m-%dT00:00:00")
-            ke = now.strftime("%Y-%m-%dT23:59:59")
+            dari = now.strftime("%Y-%m-%d 00:00:00")
+            ke = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        return jsonify(_aggregate_grafik(dari, ke, mode))
+        return jsonify(_aggregate_grafik(dari, ke))
 
     @app.route("/export_grafik")
     def export_grafik():
         dari = request.args.get("dari", "")
         ke = request.args.get("ke", "")
-        mode = request.args.get("mode", "day")
 
         if not dari or not ke:
             return {"error": "Parameter 'dari' dan 'ke' harus diisi."}, 400
 
-        data = _aggregate_grafik(dari, ke, mode)
+        data = _aggregate_grafik(dari, ke)
 
-        if not data["labels"]:
+        if not data["departments"]:
             return {"error": "Data tidak ditemukan dalam rentang waktu tersebut."}, 404
-
-        mode_labels = {"day": "Per Hari", "week": "Per Minggu", "month": "Per Bulan"}
 
         wb = Workbook()
 
-        # ── Sheet 1: Per-department summary ──
+        # ── Sheet 1: Per-department summary with chart ──
         ws_dept = wb.active
         ws_dept.title = "Data Per Departemen"
 
-        ws_dept.merge_cells("A1:H1")
-        ws_dept["A1"] = f"Grafik Keluar Masuk Per Zona — {mode_labels.get(mode, mode)}"
+        ws_dept.merge_cells("A1:G1")
+        ws_dept["A1"] = "Grafik Keluar Masuk Per Zona"
         ws_dept["A1"].font = Font(bold=True, size=14)
         ws_dept["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
-        ws_dept.merge_cells("A2:H2")
+        ws_dept.merge_cells("A2:G2")
         ws_dept["A2"] = f"Periode: {dari} s/d {ke}"
         ws_dept["A2"].alignment = Alignment(horizontal="center")
 
@@ -780,68 +800,7 @@ def register_routes(app):
 
             ws_dept.add_chart(chart_dept, f"A{total_row + 2}")
 
-        # ── Sheet 2: Per-period time series ──
-        ws_ts = wb.create_sheet("Data Per Periode")
-
-        ws_ts.merge_cells("A1:H1")
-        ws_ts["A1"] = f"Grafik Keluar Masuk Per Zona — {mode_labels.get(mode, mode)}"
-        ws_ts["A1"].font = Font(bold=True, size=14)
-        ws_ts["A1"].alignment = Alignment(horizontal="center", vertical="center")
-
-        ws_ts.merge_cells("A2:H2")
-        ws_ts["A2"] = f"Periode: {dari} s/d {ke}"
-        ws_ts["A2"].alignment = Alignment(horizontal="center")
-
-        ts_header_row = 4
-        ts_headers = ["Periode", "POS 1 Masuk", "POS 1 Keluar", "POS 1 Di Dalam",
-                       "POS 2 Masuk", "POS 2 Keluar", "POS 2 Di Dalam"]
-        for col_idx, h in enumerate(ts_headers, 1):
-            cell = ws_ts.cell(row=ts_header_row, column=col_idx, value=h)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = align_center
-            cell.border = border
-
-        for i, label in enumerate(data["labels"]):
-            row_num = ts_header_row + 1 + i
-            values = [
-                label,
-                data["pos1_in"][i], data["pos1_out"][i], data["pos1_cur"][i],
-                data["pos2_in"][i], data["pos2_out"][i], data["pos2_cur"][i],
-            ]
-            for col_idx, val in enumerate(values, 1):
-                cell = ws_ts.cell(row=row_num, column=col_idx, value=val)
-                cell.alignment = align_center
-                cell.border = border
-
-        last_ts_row = ts_header_row + len(data["labels"])
-
-        for col_idx in range(1, 8):
-            ws_ts.column_dimensions[get_column_letter(col_idx)].width = 18
-
-        # Time-series chart
-        chart = BarChart()
-        chart.type = "col"
-        chart.grouping = "clustered"
-        chart.title = f"Grafik Keluar Masuk — {mode_labels.get(mode, mode)}"
-        chart.y_axis.title = "Jumlah Orang"
-        chart.x_axis.title = "Periode"
-        chart.width = 30
-        chart.height = 14
-
-        chart_data = Reference(ws_ts, min_col=2, min_row=ts_header_row, max_col=7, max_row=last_ts_row)
-        cats = Reference(ws_ts, min_col=1, min_row=ts_header_row + 1, max_row=last_ts_row)
-        chart.add_data(chart_data, titles_from_data=True)
-        chart.set_categories(cats)
-
-        ts_colors = ["28A745", "90EE90", "198754", "DC3545", "FF6B6B", "B02A37"]
-        for idx, color in enumerate(ts_colors):
-            if idx < len(chart.series):
-                chart.series[idx].graphicalProperties.solidFill = color
-
-        ws_ts.add_chart(chart, f"A{last_ts_row + 2}")
-
-        logger.info(f"Export grafik oleh {request.remote_addr}: {dari} - {ke}, mode={mode}, {len(data['labels'])} periode, {len(departments)} dept")
+        logger.info(f"Export grafik oleh {request.remote_addr}: {dari} - {ke}, {len(departments)} dept")
 
         virtual_file = io.BytesIO()
         try:
@@ -851,7 +810,7 @@ def register_routes(app):
             return {"error": "Gagal menyimpan file."}, 500
 
         virtual_file.seek(0)
-        file_name = f"grafik_{mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        file_name = f"grafik_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         return send_file(
             virtual_file,
             as_attachment=True,

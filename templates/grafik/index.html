@@ -179,23 +179,15 @@
 
           <!-- Filter Form -->
           <form id="filter-form" class="row g-3 align-items-end mb-4">
-            <div class="col-md-3">
+            <div class="col-md-4">
               <label class="form-label">Dari</label>
               <input type="text" id="dari" name="dari" class="form-control">
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4">
               <label class="form-label">Sampai</label>
               <input type="text" id="ke" name="ke" class="form-control">
             </div>
-            <div class="col-md-3">
-              <label class="form-label">Tampilan</label>
-              <select name="mode" id="mode" class="form-select">
-                <option value="day">Per Hari</option>
-                <option value="week">Per Minggu</option>
-                <option value="month">Per Bulan</option>
-              </select>
-            </div>
-            <div class="col-md-3 text-end">
+            <div class="col-md-4 text-end">
               <button type="submit" class="btn btn-primary">📊 Tampilkan</button>
               <a href="#" id="btn-export" class="btn btn-success ms-2">⬇️ Export Excel</a>
             </div>
@@ -278,7 +270,7 @@
                 </tr>
               </thead>
               <tbody id="dept-body">
-                <tr><td colspan="7" class="text-center text-muted">Pilih rentang tanggal dan klik Tampilkan</td></tr>
+                <tr><td colspan="7" class="text-center text-muted">Pilih tanggal dan klik Tampilkan</td></tr>
               </tbody>
               <tfoot id="dept-foot" style="display:none;">
                 <tr class="fw-bold">
@@ -291,31 +283,6 @@
                   <td class="text-center" id="foot-p2c">0</td>
                 </tr>
               </tfoot>
-            </table>
-          </div>
-
-          <!-- Period Table -->
-          <h5 class="fw-bold mb-3">Data Per Periode</h5>
-          <div class="table-responsive">
-            <table class="table table-bordered table-striped table-hover" id="period-table">
-              <thead>
-                <tr>
-                  <th rowspan="2" class="align-middle text-center">Periode</th>
-                  <th colspan="3" class="text-center bg-success text-white">POS 1</th>
-                  <th colspan="3" class="text-center bg-danger text-white">POS 2</th>
-                </tr>
-                <tr>
-                  <th class="text-center">Masuk</th>
-                  <th class="text-center">Keluar</th>
-                  <th class="text-center">Di Dalam</th>
-                  <th class="text-center">Masuk</th>
-                  <th class="text-center">Keluar</th>
-                  <th class="text-center">Di Dalam</th>
-                </tr>
-              </thead>
-              <tbody id="period-body">
-                <tr><td colspan="7" class="text-center text-muted">Pilih rentang tanggal dan klik Tampilkan</td></tr>
-              </tbody>
             </table>
           </div>
 
@@ -341,7 +308,7 @@
   function formatToSQLDatetime(value) {
     const date = new Date(value);
     const pad = n => n.toString().padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   }
 
   document.getElementById('filter-form').addEventListener('submit', function (e) {
@@ -352,104 +319,68 @@
   function loadGrafik() {
     const dari = document.getElementById('dari').value;
     const ke = document.getElementById('ke').value;
-    const mode = document.getElementById('mode').value;
 
     if (!dari || !ke) {
-      alert('Silakan pilih rentang tanggal.');
+      alert('Silakan pilih tanggal.');
       return;
     }
 
     const params = new URLSearchParams();
     params.set('dari', formatToSQLDatetime(dari));
     params.set('ke', formatToSQLDatetime(ke));
-    params.set('mode', mode);
 
     const deptBody = document.getElementById('dept-body');
-    const periodBody = document.getElementById('period-body');
     deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Memuat data...</td></tr>';
-    periodBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Memuat data...</td></tr>';
 
     fetch(`/api/grafik?${params.toString()}`)
       .then(res => res.json())
       .then(data => {
-        if ((!data.labels || data.labels.length === 0) && (!data.departments || data.departments.length === 0)) {
+        if (!data.departments || data.departments.length === 0) {
           deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Data tidak ditemukan</td></tr>';
-          periodBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Data tidak ditemukan</td></tr>';
           if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
           document.getElementById('summary-cards').style.display = 'none';
           document.getElementById('dept-foot').style.display = 'none';
           return;
         }
 
-        // Summary totals
-        const sumP1I = data.pos1_in.reduce((a, b) => a + b, 0);
-        const sumP1O = data.pos1_out.reduce((a, b) => a + b, 0);
-        const sumP1C = data.pos1_cur.reduce((a, b) => a + b, 0);
-        const sumP2I = data.pos2_in.reduce((a, b) => a + b, 0);
-        const sumP2O = data.pos2_out.reduce((a, b) => a + b, 0);
-        const sumP2C = data.pos2_cur.reduce((a, b) => a + b, 0);
-
-        document.getElementById('sum-pos1-in').textContent = sumP1I;
-        document.getElementById('sum-pos1-out').textContent = sumP1O;
-        document.getElementById('sum-pos1-cur').textContent = sumP1C;
-        document.getElementById('sum-pos2-in').textContent = sumP2I;
-        document.getElementById('sum-pos2-out').textContent = sumP2O;
-        document.getElementById('sum-pos2-cur').textContent = sumP2C;
+        // Summary totals (now scalars, not arrays)
+        document.getElementById('sum-pos1-in').textContent = data.pos1_in;
+        document.getElementById('sum-pos1-out').textContent = data.pos1_out;
+        document.getElementById('sum-pos1-cur').textContent = data.pos1_cur;
+        document.getElementById('sum-pos2-in').textContent = data.pos2_in;
+        document.getElementById('sum-pos2-out').textContent = data.pos2_out;
+        document.getElementById('sum-pos2-cur').textContent = data.pos2_cur;
         document.getElementById('summary-cards').style.display = 'flex';
 
         // Department table
         deptBody.innerHTML = '';
-        if (data.departments && data.departments.length > 0) {
-          data.departments.forEach(dept => {
-            deptBody.innerHTML += `
-              <tr>
-                <td class="text-start fw-bold">${dept.dept}</td>
-                <td class="text-center">${dept.pos1_in}</td>
-                <td class="text-center">${dept.pos1_out}</td>
-                <td class="text-center">${dept.pos1_cur}</td>
-                <td class="text-center">${dept.pos2_in}</td>
-                <td class="text-center">${dept.pos2_out}</td>
-                <td class="text-center">${dept.pos2_cur}</td>
-              </tr>
-            `;
-          });
-          document.getElementById('foot-p1i').textContent = sumP1I;
-          document.getElementById('foot-p1o').textContent = sumP1O;
-          document.getElementById('foot-p1c').textContent = sumP1C;
-          document.getElementById('foot-p2i').textContent = sumP2I;
-          document.getElementById('foot-p2o').textContent = sumP2O;
-          document.getElementById('foot-p2c').textContent = sumP2C;
-          document.getElementById('dept-foot').style.display = '';
-        } else {
-          deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Tidak ada data departemen</td></tr>';
-          document.getElementById('dept-foot').style.display = 'none';
-        }
+        data.departments.forEach(dept => {
+          deptBody.innerHTML += `
+            <tr>
+              <td class="text-start fw-bold">${dept.dept}</td>
+              <td class="text-center">${dept.pos1_in}</td>
+              <td class="text-center">${dept.pos1_out}</td>
+              <td class="text-center">${dept.pos1_cur}</td>
+              <td class="text-center">${dept.pos2_in}</td>
+              <td class="text-center">${dept.pos2_out}</td>
+              <td class="text-center">${dept.pos2_cur}</td>
+            </tr>
+          `;
+        });
+        document.getElementById('foot-p1i').textContent = data.pos1_in;
+        document.getElementById('foot-p1o').textContent = data.pos1_out;
+        document.getElementById('foot-p1c').textContent = data.pos1_cur;
+        document.getElementById('foot-p2i').textContent = data.pos2_in;
+        document.getElementById('foot-p2o').textContent = data.pos2_out;
+        document.getElementById('foot-p2c').textContent = data.pos2_cur;
+        document.getElementById('dept-foot').style.display = '';
 
-        // Period table
-        periodBody.innerHTML = '';
-        if (data.labels && data.labels.length > 0) {
-          data.labels.forEach((label, i) => {
-            periodBody.innerHTML += `
-              <tr>
-                <td class="text-center">${label}</td>
-                <td class="text-center">${data.pos1_in[i]}</td>
-                <td class="text-center">${data.pos1_out[i]}</td>
-                <td class="text-center">${data.pos1_cur[i]}</td>
-                <td class="text-center">${data.pos2_in[i]}</td>
-                <td class="text-center">${data.pos2_out[i]}</td>
-                <td class="text-center">${data.pos2_cur[i]}</td>
-              </tr>
-            `;
-          });
-        }
-
-        // Update chart
+        // Update chart (grouped by department)
         renderChart(data);
       })
       .catch(err => {
         console.error(err);
         deptBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Gagal memuat data</td></tr>';
-        periodBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Gagal memuat data</td></tr>';
       });
   }
 
@@ -460,49 +391,57 @@
       chartInstance.destroy();
     }
 
+    const labels = data.departments.map(d => d.dept);
+    const pos1In = data.departments.map(d => d.pos1_in);
+    const pos1Out = data.departments.map(d => d.pos1_out);
+    const pos1Cur = data.departments.map(d => d.pos1_cur);
+    const pos2In = data.departments.map(d => d.pos2_in);
+    const pos2Out = data.departments.map(d => d.pos2_out);
+    const pos2Cur = data.departments.map(d => d.pos2_cur);
+
     chartInstance = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: data.labels,
+        labels: labels,
         datasets: [
           {
             label: 'POS 1 Masuk',
-            data: data.pos1_in,
+            data: pos1In,
             backgroundColor: 'rgba(40, 167, 69, 0.7)',
             borderColor: 'rgba(40, 167, 69, 1)',
             borderWidth: 1
           },
           {
             label: 'POS 1 Keluar',
-            data: data.pos1_out,
+            data: pos1Out,
             backgroundColor: 'rgba(40, 167, 69, 0.3)',
             borderColor: 'rgba(40, 167, 69, 0.8)',
             borderWidth: 1
           },
           {
             label: 'POS 1 Di Dalam',
-            data: data.pos1_cur,
+            data: pos1Cur,
             backgroundColor: 'rgba(25, 135, 84, 0.5)',
             borderColor: 'rgba(25, 135, 84, 1)',
             borderWidth: 1
           },
           {
             label: 'POS 2 Masuk',
-            data: data.pos2_in,
+            data: pos2In,
             backgroundColor: 'rgba(220, 53, 69, 0.7)',
             borderColor: 'rgba(220, 53, 69, 1)',
             borderWidth: 1
           },
           {
             label: 'POS 2 Keluar',
-            data: data.pos2_out,
+            data: pos2Out,
             backgroundColor: 'rgba(220, 53, 69, 0.3)',
             borderColor: 'rgba(220, 53, 69, 0.8)',
             borderWidth: 1
           },
           {
             label: 'POS 2 Di Dalam',
-            data: data.pos2_cur,
+            data: pos2Cur,
             backgroundColor: 'rgba(176, 42, 55, 0.5)',
             borderColor: 'rgba(176, 42, 55, 1)',
             borderWidth: 1
@@ -528,7 +467,7 @@
             title: { display: true, text: 'Jumlah Orang' }
           },
           x: {
-            title: { display: true, text: 'Periode' }
+            title: { display: true, text: 'Departemen' }
           }
         }
       }
@@ -544,10 +483,9 @@
 
     const dari = document.getElementById('dari').value;
     const ke = document.getElementById('ke').value;
-    const mode = document.getElementById('mode').value;
 
     if (!dari || !ke) {
-      alert('Silakan pilih rentang tanggal terlebih dahulu.');
+      alert('Silakan pilih tanggal terlebih dahulu.');
       return;
     }
 
@@ -556,7 +494,6 @@
     const params = new URLSearchParams();
     params.set('dari', formatToSQLDatetime(dari));
     params.set('ke', formatToSQLDatetime(ke));
-    params.set('mode', mode);
 
     fetch(`/export_grafik?${params.toString()}`)
       .then(response => {
@@ -596,18 +533,24 @@
   });
 
   window.addEventListener('DOMContentLoaded', () => {
+    // Default: today 00:00:00 to now (same as zona hijau)
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+
     flatpickr('#dari', {
       enableTime: true,
-      dateFormat: 'Y-m-d H:i',
+      enableSeconds: true,
+      dateFormat: 'Y-m-d H:i:S',
       time_24hr: true,
-      defaultDate: new Date(new Date().setDate(new Date().getDate() - 7))
+      defaultDate: todayStart
     });
 
     flatpickr('#ke', {
       enableTime: true,
-      dateFormat: 'Y-m-d H:i',
+      enableSeconds: true,
+      dateFormat: 'Y-m-d H:i:S',
       time_24hr: true,
-      defaultDate: new Date()
+      defaultDate: now
     });
 
     setTimeout(() => {
