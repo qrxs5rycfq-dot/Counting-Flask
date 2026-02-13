@@ -483,7 +483,11 @@ def register_routes(app):
 
     def _aggregate_grafik(dari, ke, mode):
         """Aggregate entry/exit data per period and zone."""
-        records = get_grafik_data(dari, ke)
+        try:
+            records = get_grafik_data(dari, ke)
+        except Exception as e:
+            logger.error(f"Gagal mengambil data grafik: {e}")
+            return {"labels": [], "hijau_in": [], "hijau_out": [], "merah_in": [], "merah_out": []}
         aggregated = {}
 
         for record in records:
