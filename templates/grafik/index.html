@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap5/bootstrap.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='flatpickr/flatpickr.min.css') }}">
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background-color: #f0f2f5;
+    }
+
+    .navbar-toggler { border: none; display: block !important; }
+    .navbar-toggler:focus { box-shadow: none; }
+    .navbar-collapse { display: none; }
+    .navbar-collapse.show { display: block !important; }
+
+    .card {
+      border: none;
+      border-radius: 1rem;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07);
+    }
+
+    .form-label { font-weight: 500; }
+
+    .btn {
+      min-width: 120px;
+      transition: all 0.3s ease-in-out;
+    }
+    .btn:hover { transform: scale(1.03); }
+
+    .fade-in {
+      animation: fadeIn 0.6s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    #splash {
+      position: fixed;
+      background: white;
+      z-index: 9999;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      transition: opacity 0.6s ease;
+    }
+
+    #logo {
+      max-width: 120px;
+      margin-bottom: 12px;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 5px solid rgba(0, 123, 255, 0.2);
+      border-top-color: #007bff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #loading-spinner .overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background-color: rgba(255, 255, 255, 0.6); z-index: 9998;
+    }
+
+    #loading-spinner .spinner-wrapper {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%); z-index: 9999; text-align: center;
+    }
+
+    .custom-spinner {
+      border: 5px solid #e0e0e0;
+      border-top: 5px solid #0d6efd;
+      border-radius: 50%;
+      width: 50px; height: 50px;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto;
+    }
+
+    .loading-text {
+      margin-top: 12px; font-weight: 600; color: #333; font-size: 16px;
+    }
+
+    .chart-container {
+      position: relative;
+      width: 100%;
+      height: 400px;
+      min-height: 350px;
+    }
+
+    .summary-card {
+      border-radius: 1rem;
+      padding: 1.2rem 0.8rem;
+      text-align: center;
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+      transition: transform 0.2s;
+    }
+    .summary-card:hover { transform: translateY(-3px); }
+    .summary-card h6 { font-size: 0.85rem; margin-bottom: 0.3rem; opacity: 0.9; }
+    .summary-card .num { font-size: 2rem; font-weight: 800; }
+
+    .bg-pos1-in  { background: linear-gradient(135deg, #28a745, #20c997); }
+    .bg-pos1-out { background: linear-gradient(135deg, #6c757d, #adb5bd); }
+    .bg-pos1-cur { background: linear-gradient(135deg, #0d6efd, #6ea8fe); }
+    .bg-pos2-in  { background: linear-gradient(135deg, #dc3545, #e35d6a); }
+    .bg-pos2-out { background: linear-gradient(135deg, #fd7e14, #ffc107); }
+    .bg-pos2-cur { background: linear-gradient(135deg, #0dcaf0, #6edff6); }
+
+    .watermark {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex; align-items: center; gap: 10px;
+      opacity: 0.2; font-size: 22px; color: #000;
+      font-weight: 700; z-index: -1; pointer-events: none;
+    }
+
+    .watermark img {
+      height: 700px; max-width: 90vw; opacity: 0.5;
+    }
+
+    @media (max-width: 768px) {
+      .watermark img { height: 40vh; }
+      .chart-container { height: 300px; min-height: 250px; }
+    }
+
+    .table th { background-color: #f1f1f1; }
+    .table-striped tbody tr:nth-of-type(odd) { background-color: #f9f9f9; }
+    .subtotal-row td { background-color: #e2efda !important; font-weight: 600; font-style: italic; }
+  </style>
+</head>
+<body class="d-flex flex-column">
+
+<!-- Navbar -->
+<nav class="navbar navbar-light bg-white shadow-sm">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">
+      <img src="{{ url_for('static', filename='images/logo-ip3.png') }}" alt="Logo PLN" style="height: 40px;">
+    </a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+  </div>
+  <div class="collapse navbar-collapse justify-content-center text-center px-3 pb-2" id="mainNavbar">
+    <ul class="navbar-nav d-flex flex-column align-items-center w-100">
+      <li class="nav-item w-100"><a class="nav-link" href="/transaksi">TRANSAKSI</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/">ZONA HIJAU</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/merah">ZONA MERAH</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/all">SEMUA ZONA</a></li>
+      <li class="nav-item w-100"><a class="nav-link active" href="/grafik">GRAFIK</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/register">REGISTRASI PERSONAL</a></li>
+      <li class="nav-item w-100"><a class="nav-link" href="/register_visitor">REGISTRASI VISITOR</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Splash -->
+<div id="splash">
+  <img src="{{ url_for('static', filename='images/app.ico') }}" id="logo" alt="Logo">
+  <div class="spinner"></div>
+  <p class="text-muted mt-3">Memuat halaman...</p>
+</div>
+
+<div id="loading-spinner" style="display:none;">
+  <div class="overlay"></div>
+  <div class="spinner-wrapper">
+    <div class="custom-spinner"></div>
+    <div class="loading-text">Mengunduh data...</div>
+  </div>
+</div>
+
+<!-- Main Content -->
+<div class="container-fluid flex-fill py-4 fade-in" style="display: none;" id="main-content">
+  <div class="row justify-content-center">
+    <div class="col-12 col-lg-11">
+      <div class="card">
+        <div class="card-body p-4">
+          <h3 class="mb-4 text-center fw-bold">{{ title }}</h3>
+
+          <!-- Filter Form -->
+          <form id="filter-form" class="row g-3 align-items-end mb-4">
+            <div class="col-md-3">
+              <label class="form-label">Dari</label>
+              <input type="text" id="dari" name="dari" class="form-control">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Sampai</label>
+              <input type="text" id="ke" name="ke" class="form-control">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Nama</label>
+              <input type="text" id="filter-nama" name="nama" class="form-control" placeholder="Cari nama...">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Departemen</label>
+              <input type="text" id="filter-dept" name="dept" class="form-control" placeholder="Cari departemen...">
+            </div>
+            <div class="col-md-2 text-end">
+              <button type="submit" class="btn btn-primary">📊 Tampilkan</button>
+              <a href="#" id="btn-export" class="btn btn-success ms-2">⬇️ Export</a>
+            </div>
+          </form>
+
+          <!-- Summary Cards -->
+          <div class="row g-3 mb-4" id="summary-cards" style="display:none;">
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos1-in">
+                <h6>POS 1 — MASUK</h6>
+                <div class="num" id="sum-pos1-in">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos1-out">
+                <h6>POS 1 — KELUAR</h6>
+                <div class="num" id="sum-pos1-out">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos1-cur">
+                <h6>POS 1 — DI DALAM</h6>
+                <div class="num" id="sum-pos1-cur">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos2-in">
+                <h6>POS 2 — MASUK</h6>
+                <div class="num" id="sum-pos2-in">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos2-out">
+                <h6>POS 2 — KELUAR</h6>
+                <div class="num" id="sum-pos2-out">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="summary-card bg-pos2-cur">
+                <h6>POS 2 — DI DALAM</h6>
+                <div class="num" id="sum-pos2-cur">0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="row g-3 mb-4" id="chart-row" style="display:none;">
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-body">
+                  <div class="chart-container">
+                    <canvas id="chartPos1"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-body">
+                  <div class="chart-container">
+                    <canvas id="chartPos2"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Data Table -->
+          <h5 class="fw-bold mb-3" id="table-title">Data Per Departemen</h5>
+          <div class="table-responsive mb-4">
+            <table class="table table-bordered table-striped table-hover" id="dept-table">
+              <thead id="dept-head">
+                <tr>
+                  <th rowspan="2" class="align-middle text-center">DEPARTEMEN</th>
+                  <th colspan="3" class="text-center bg-success text-white">POS 1</th>
+                  <th colspan="3" class="text-center bg-danger text-white">POS 2</th>
+                </tr>
+                <tr>
+                  <th class="text-center">MASUK</th>
+                  <th class="text-center">KELUAR</th>
+                  <th class="text-center">DI DALAM</th>
+                  <th class="text-center">MASUK</th>
+                  <th class="text-center">KELUAR</th>
+                  <th class="text-center">DI DALAM</th>
+                </tr>
+              </thead>
+              <tbody id="dept-body">
+                <tr><td colspan="7" class="text-center text-muted">Memuat data...</td></tr>
+              </tbody>
+              <tfoot id="dept-foot" style="display:none;"></tfoot>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Watermark -->
+<div class="watermark">
+  <img src="{{ url_for('static', filename='images/SMOOHT.png') }}" alt="OTI">
+</div>
+
+<!-- Scripts -->
+<script src="{{ url_for('static', filename='flatpickr/flatpickr.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+
+<script>
+  let chartPos1 = null;
+  let chartPos2 = null;
+
+  function formatToSQLDatetime(value) {
+    const date = new Date(value);
+    const pad = n => n.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  document.getElementById('filter-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    loadGrafik();
+  });
+
+  function loadGrafik() {
+    const dari = document.getElementById('dari').value;
+    const ke = document.getElementById('ke').value;
+    const nama = document.getElementById('filter-nama').value.trim();
+    const dept = document.getElementById('filter-dept').value.trim();
+
+    if (!dari || !ke) {
+      alert('Silakan pilih tanggal.');
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('dari', formatToSQLDatetime(dari));
+    params.set('ke', formatToSQLDatetime(ke));
+    if (nama) params.set('nama', nama);
+    if (dept) params.set('dept', dept);
+
+    const deptBody = document.getElementById('dept-body');
+    deptBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Memuat data...</td></tr>';
+
+    fetch(`/api/grafik?${params.toString()}`)
+      .then(res => res.json())
+      .then(data => {
+        const dailyData = data.daily_data || [];
+        const multiDay = dailyData.length > 1;
+
+        if (dailyData.length === 0) {
+          deptBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Data tidak ditemukan</td></tr>';
+          destroyCharts();
+          document.getElementById('summary-cards').style.display = 'none';
+          document.getElementById('chart-row').style.display = 'none';
+          document.getElementById('dept-foot').style.display = 'none';
+          return;
+        }
+
+        // Summary cards (grand totals)
+        document.getElementById('sum-pos1-in').textContent = data.pos1_in;
+        document.getElementById('sum-pos1-out').textContent = data.pos1_out;
+        document.getElementById('sum-pos1-cur').textContent = data.pos1_cur;
+        document.getElementById('sum-pos2-in').textContent = data.pos2_in;
+        document.getElementById('sum-pos2-out').textContent = data.pos2_out;
+        document.getElementById('sum-pos2-cur').textContent = data.pos2_cur;
+        document.getElementById('summary-cards').style.display = 'flex';
+
+        // Build table
+        const tableTitle = document.getElementById('table-title');
+        const deptHead = document.getElementById('dept-head');
+        const deptFoot = document.getElementById('dept-foot');
+        deptBody.innerHTML = '';
+
+        if (multiDay) {
+          tableTitle.textContent = 'Data Per Tanggal & Departemen';
+          deptHead.innerHTML = `
+            <tr>
+              <th rowspan="2" class="align-middle text-center">TANGGAL</th>
+              <th rowspan="2" class="align-middle text-center">DEPARTEMEN</th>
+              <th colspan="3" class="text-center bg-success text-white">POS 1</th>
+              <th colspan="3" class="text-center bg-danger text-white">POS 2</th>
+            </tr>
+            <tr>
+              <th class="text-center">MASUK</th>
+              <th class="text-center">KELUAR</th>
+              <th class="text-center">DI DALAM</th>
+              <th class="text-center">MASUK</th>
+              <th class="text-center">KELUAR</th>
+              <th class="text-center">DI DALAM</th>
+            </tr>`;
+
+          dailyData.forEach(day => {
+            const depts = day.departments || [];
+            depts.forEach((dept, idx) => {
+              const dateCell = idx === 0
+                ? `<td class="text-center fw-bold" rowspan="${depts.length}">${day.date}</td>`
+                : '';
+              deptBody.innerHTML += `
+                <tr>
+                  ${dateCell}
+                  <td class="text-start fw-bold">${dept.dept}</td>
+                  <td class="text-center">${dept.pos1_in}</td>
+                  <td class="text-center">${dept.pos1_out}</td>
+                  <td class="text-center">${dept.pos1_cur}</td>
+                  <td class="text-center">${dept.pos2_in}</td>
+                  <td class="text-center">${dept.pos2_out}</td>
+                  <td class="text-center">${dept.pos2_cur}</td>
+                </tr>`;
+            });
+            // Subtotal row per date
+            deptBody.innerHTML += `
+              <tr class="subtotal-row">
+                <td class="text-center" colspan="2">Subtotal ${day.date}</td>
+                <td class="text-center">${day.pos1_in}</td>
+                <td class="text-center">${day.pos1_out}</td>
+                <td class="text-center">${day.pos1_cur}</td>
+                <td class="text-center">${day.pos2_in}</td>
+                <td class="text-center">${day.pos2_out}</td>
+                <td class="text-center">${day.pos2_cur}</td>
+              </tr>`;
+          });
+
+          deptFoot.innerHTML = `
+            <tr class="fw-bold">
+              <td class="text-center" colspan="2">GRAND TOTAL</td>
+              <td class="text-center">${data.pos1_in}</td>
+              <td class="text-center">${data.pos1_out}</td>
+              <td class="text-center">${data.pos1_cur}</td>
+              <td class="text-center">${data.pos2_in}</td>
+              <td class="text-center">${data.pos2_out}</td>
+              <td class="text-center">${data.pos2_cur}</td>
+            </tr>`;
+          deptFoot.style.display = '';
+
+        } else {
+          tableTitle.textContent = 'Data Per Departemen';
+          deptHead.innerHTML = `
+            <tr>
+              <th rowspan="2" class="align-middle text-center">DEPARTEMEN</th>
+              <th colspan="3" class="text-center bg-success text-white">POS 1</th>
+              <th colspan="3" class="text-center bg-danger text-white">POS 2</th>
+            </tr>
+            <tr>
+              <th class="text-center">MASUK</th>
+              <th class="text-center">KELUAR</th>
+              <th class="text-center">DI DALAM</th>
+              <th class="text-center">MASUK</th>
+              <th class="text-center">KELUAR</th>
+              <th class="text-center">DI DALAM</th>
+            </tr>`;
+
+          const depts = dailyData[0].departments || [];
+          depts.forEach(dept => {
+            deptBody.innerHTML += `
+              <tr>
+                <td class="text-start fw-bold">${dept.dept}</td>
+                <td class="text-center">${dept.pos1_in}</td>
+                <td class="text-center">${dept.pos1_out}</td>
+                <td class="text-center">${dept.pos1_cur}</td>
+                <td class="text-center">${dept.pos2_in}</td>
+                <td class="text-center">${dept.pos2_out}</td>
+                <td class="text-center">${dept.pos2_cur}</td>
+              </tr>`;
+          });
+
+          deptFoot.innerHTML = `
+            <tr class="fw-bold">
+              <td class="text-center">TOTAL</td>
+              <td class="text-center">${data.pos1_in}</td>
+              <td class="text-center">${data.pos1_out}</td>
+              <td class="text-center">${data.pos1_cur}</td>
+              <td class="text-center">${data.pos2_in}</td>
+              <td class="text-center">${data.pos2_out}</td>
+              <td class="text-center">${data.pos2_cur}</td>
+            </tr>`;
+          deptFoot.style.display = '';
+        }
+
+        // Charts
+        try {
+          document.getElementById('chart-row').style.display = 'flex';
+          if (multiDay) {
+            renderChartsMultiDay(dailyData);
+          } else {
+            renderChartsSingleDay(dailyData[0].departments || []);
+          }
+        } catch (chartErr) {
+          console.warn('Chart rendering failed:', chartErr);
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        deptBody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">Gagal memuat data</td></tr>';
+      });
+  }
+
+  function destroyCharts() {
+    if (chartPos1) { chartPos1.destroy(); chartPos1 = null; }
+    if (chartPos2) { chartPos2.destroy(); chartPos2 = null; }
+  }
+
+  function renderChartsSingleDay(departments) {
+    destroyCharts();
+    const labels = departments.map(d => d.dept);
+
+    chartPos1 = new Chart(document.getElementById('chartPos1').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Masuk', data: departments.map(d => d.pos1_in), backgroundColor: 'rgba(40,167,69,0.8)', borderColor: '#28a745', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Keluar', data: departments.map(d => d.pos1_out), backgroundColor: 'rgba(108,117,125,0.8)', borderColor: '#6c757d', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Di Dalam', data: departments.map(d => d.pos1_cur), backgroundColor: 'rgba(13,110,253,0.8)', borderColor: '#0d6efd', borderWidth: 2, borderRadius: 6, borderSkipped: false }
+        ]
+      },
+      options: chartOptions('POS 1 — Per Departemen'),
+      plugins: [ChartDataLabels]
+    });
+
+    chartPos2 = new Chart(document.getElementById('chartPos2').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Masuk', data: departments.map(d => d.pos2_in), backgroundColor: 'rgba(220,53,69,0.8)', borderColor: '#dc3545', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Keluar', data: departments.map(d => d.pos2_out), backgroundColor: 'rgba(253,126,20,0.8)', borderColor: '#fd7e14', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Di Dalam', data: departments.map(d => d.pos2_cur), backgroundColor: 'rgba(13,202,240,0.8)', borderColor: '#0dcaf0', borderWidth: 2, borderRadius: 6, borderSkipped: false }
+        ]
+      },
+      options: chartOptions('POS 2 — Per Departemen'),
+      plugins: [ChartDataLabels]
+    });
+  }
+
+  function renderChartsMultiDay(dailyData) {
+    destroyCharts();
+    const labels = dailyData.map(d => d.date);
+
+    chartPos1 = new Chart(document.getElementById('chartPos1').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Masuk', data: dailyData.map(d => d.pos1_in), backgroundColor: 'rgba(40,167,69,0.8)', borderColor: '#28a745', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Keluar', data: dailyData.map(d => d.pos1_out), backgroundColor: 'rgba(108,117,125,0.8)', borderColor: '#6c757d', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Di Dalam', data: dailyData.map(d => d.pos1_cur), backgroundColor: 'rgba(13,110,253,0.8)', borderColor: '#0d6efd', borderWidth: 2, borderRadius: 6, borderSkipped: false }
+        ]
+      },
+      options: chartOptions('POS 1 — Per Tanggal'),
+      plugins: [ChartDataLabels]
+    });
+
+    chartPos2 = new Chart(document.getElementById('chartPos2').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Masuk', data: dailyData.map(d => d.pos2_in), backgroundColor: 'rgba(220,53,69,0.8)', borderColor: '#dc3545', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Keluar', data: dailyData.map(d => d.pos2_out), backgroundColor: 'rgba(253,126,20,0.8)', borderColor: '#fd7e14', borderWidth: 2, borderRadius: 6, borderSkipped: false },
+          { label: 'Di Dalam', data: dailyData.map(d => d.pos2_cur), backgroundColor: 'rgba(13,202,240,0.8)', borderColor: '#0dcaf0', borderWidth: 2, borderRadius: 6, borderSkipped: false }
+        ]
+      },
+      options: chartOptions('POS 2 — Per Tanggal'),
+      plugins: [ChartDataLabels]
+    });
+  }
+
+  function chartOptions(titleText) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        title: {
+          display: true,
+          text: titleText,
+          font: { size: 15, weight: 'bold' },
+          padding: { bottom: 16 }
+        },
+        legend: {
+          position: 'top',
+          labels: { usePointStyle: true, pointStyle: 'rectRounded', padding: 14, font: { size: 12 } }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          titleFont: { size: 13 },
+          bodyFont: { size: 12 },
+          cornerRadius: 8,
+          padding: 10
+        },
+        datalabels: {
+          anchor: 'end',
+          align: 'top',
+          font: { weight: 'bold', size: 11 },
+          color: '#333',
+          formatter: function(value) { return value > 0 ? value : ''; }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(0,0,0,0.06)' },
+          ticks: { stepSize: 1, font: { size: 11 } },
+          title: { display: true, text: 'Jumlah Orang', font: { size: 12 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 10 }, maxRotation: 45, minRotation: 0 }
+        }
+      }
+    };
+  }
+
+  // Export Excel
+  const btnExport = document.getElementById('btn-export');
+  const spinner = document.getElementById('loading-spinner');
+
+  btnExport.addEventListener('click', function (e) {
+    e.preventDefault();
+
+    const dari = document.getElementById('dari').value;
+    const ke = document.getElementById('ke').value;
+    const nama = document.getElementById('filter-nama').value.trim();
+    const dept = document.getElementById('filter-dept').value.trim();
+
+    if (!dari || !ke) {
+      alert('Silakan pilih tanggal terlebih dahulu.');
+      return;
+    }
+
+    spinner.style.display = 'block';
+
+    const params = new URLSearchParams();
+    params.set('dari', formatToSQLDatetime(dari));
+    params.set('ke', formatToSQLDatetime(ke));
+    if (nama) params.set('nama', nama);
+    if (dept) params.set('dept', dept);
+
+    fetch(`/export_grafik?${params.toString()}`)
+      .then(response => {
+        if (!response.ok) throw new Error('Gagal mengunduh file.');
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'grafik_export.xlsx';
+        if (disposition && disposition.includes('filename=')) {
+          const match = disposition.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
+          if (match && match[1]) filename = decodeURIComponent(match[1]);
+        }
+        return response.blob().then(blob => ({ blob, filename }));
+      })
+      .then(({ blob, filename }) => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      })
+      .catch(err => {
+        alert('❌ Gagal mengunduh file: ' + err.message);
+      })
+      .finally(() => {
+        spinner.style.display = 'none';
+      });
+  });
+
+  // Navbar collapse
+  document.querySelectorAll('.navbar-nav .nav-link').forEach(function (el) {
+    el.addEventListener('click', function () {
+      const navbarCollapse = document.getElementById('mainNavbar');
+      const bsCollapse = bootstrap.Collapse.getInstance(navbarCollapse);
+      if (bsCollapse) bsCollapse.hide();
+    });
+  });
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+
+    flatpickr('#dari', {
+      enableTime: true,
+      enableSeconds: true,
+      dateFormat: 'Y-m-d H:i:S',
+      time_24hr: true,
+      defaultDate: todayStart
+    });
+
+    flatpickr('#ke', {
+      enableTime: true,
+      enableSeconds: true,
+      dateFormat: 'Y-m-d H:i:S',
+      time_24hr: true,
+      defaultDate: now
+    });
+
+    setTimeout(() => {
+      const splash = document.getElementById('splash');
+      splash.style.opacity = 0;
+      setTimeout(() => {
+        splash.style.display = 'none';
+        document.getElementById('main-content').style.display = 'block';
+        loadGrafik();
+      }, 600);
+    }, 1000);
+  });
+</script>
+</body>
+</html>

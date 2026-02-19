@@ -19,12 +19,13 @@ from werkzeug.utils import secure_filename
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
-from openpyxl.styles import Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Side, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import BarChart, Reference
 
 from app.utils.helpers import get_departments, get_zone_data, allowed_file
 from blacklist.blacklist_tracker import BlacklistTracker
-from models.db import get_transaksi_filtered
+from models.db import get_transaksi_filtered, get_grafik_data
 
 # ─── Logging Setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -428,6 +429,11 @@ def register_routes(app):
     def transaksi():
         return render_template("transaksi/index.html", title=transaksi_title)
 
+    @app.route("/grafik")
+    def grafik():
+        grafik_title = os.getenv("GRAFIK_TITLE", "Grafik Keluar Masuk Per Zona")
+        return render_template("grafik/index.html", title=grafik_title)
+
     # ─── API Zone Data ─────────────────
     @app.route("/api/data")
     def api_data():
@@ -474,6 +480,508 @@ def register_routes(app):
             "page": page,
             "rows": result
         })
+
+    def _process_zone_events(events, in_devices, out_devices):
+        """
+        Synchronous replica of EventProcessor.process_events() for one zone.
+        Events should include previous day + today combined (same as zone pages).
+        No separate prev_events — carry-over happens naturally through the state machine.
+        """
+        in_devs = {d.strip().upper() for d in in_devices}
+        out_devs = {d.strip().upper() for d in out_devices}
+        reader_in = {d for d in in_devs if "-READER" in d}
+        reader_out = {d for d in out_devs if "-READER" in d}
+
+        def get_type(dev_name):
+            dev_upper = dev_name.strip().upper()
+            if dev_upper in {d.replace("-READER", "") for d in in_devs}:
+                return "in"
+            if dev_upper in {d.replace("-READER", "") for d in out_devs}:
+                return "out"
+            return None
+
+        def ts_from_val(val):
+            try:
+                if isinstance(val, datetime):
+                    return int(val.timestamp())
+                return int(datetime.strptime(str(val).strip(), "%Y-%m-%d %H:%M:%S").timestamp())
+            except (ValueError, TypeError, OSError):
+                return None
+
+        # Step 1: Collect events per person (same as EventProcessor)
+        per_person = {}
+        for e in events:
+            pin = (e.get("pin") or "").strip()
+            name = (e.get("name") or "").strip()
+            dept = (e.get("dept_name") or "").strip()
+
+            dev_alias = str(e.get("dev_alias") or "").strip().upper()
+            event_point_name = str(e.get("event_point_name") or "").strip().upper()
+
+            # Device resolution: match -READER pattern (same as EventProcessor)
+            dev = dev_alias
+            for reader_dev in (reader_in | reader_out):
+                base_name = reader_dev.replace("-READER", "").strip().upper()
+                if event_point_name == base_name:
+                    dev = event_point_name
+                    break
+
+            time_raw = e.get("event_time")
+            time_str = str(time_raw).strip() if time_raw else ""
+            ts = ts_from_val(time_raw)
+
+            # Same skip conditions as EventProcessor
+            if not all([dept, pin, dev, time_str]) or ts is None:
+                continue
+
+            ev_type = get_type(dev)
+            if not ev_type:
+                continue
+
+            person = per_person.setdefault(pin, {"dept": dept, "name": name, "events": []})
+            person["events"].append({"type": ev_type, "ts": ts, "time": time_str})
+
+        # Step 2: State-machine per person (same logic as EventProcessor)
+        result = {}
+        for pin, person in per_person.items():
+            events_sorted = sorted(person["events"], key=lambda x: x["ts"])
+            status = "outside"
+            logical_in = 0
+            logical_out = 0
+            current = 0
+
+            for ev in events_sorted:
+                if ev["type"] == "in" and status == "outside":
+                    status = "inside"
+                    logical_in += 1
+                    current += 1
+                elif ev["type"] == "out" and status == "inside":
+                    status = "outside"
+                    logical_out += 1
+                    current -= 1
+
+            if logical_in == 0 and logical_out == 0:
+                continue
+
+            result[pin] = {
+                "dept": person["dept"],
+                "logical_in": logical_in,
+                "logical_out": logical_out,
+                "current": current,
+            }
+
+        return result
+
+    def _aggregate_grafik(dari, ke, nama_filter="", dept_filter=""):
+        """
+        Aggregate entry/exit/current data per department and zone.
+        Processes events day-by-day (each day uses a 2-day window like zone pages).
+        Returns per-day breakdown in daily_data[] and grand totals.
+        Optionally filters events by name and/or department (case-insensitive partial match).
+        """
+        from datetime import timedelta, time as _time, date as _date
+
+        empty = {
+            "pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+            "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0,
+            "departments": [],
+            "daily_data": [],
+            "dates": []
+        }
+        try:
+            events = get_grafik_data(dari, ke)
+        except Exception as e:
+            logger.error(f"Gagal mengambil data grafik: {e}")
+            return empty
+
+        if not events:
+            return empty
+
+        # Apply name/department filters (case-insensitive partial match)
+        nama_q = nama_filter.strip().lower()
+        dept_q = dept_filter.strip().lower()
+        if nama_q or dept_q:
+            filtered = []
+            for e in events:
+                ename = (e.get("name") or "").strip().lower()
+                edept = (e.get("dept_name") or "").strip().lower()
+                if nama_q and nama_q not in ename:
+                    continue
+                if dept_q and dept_q not in edept:
+                    continue
+                filtered.append(e)
+            events = filtered
+
+        if not events:
+            return empty
+
+        # Parse dari/ke to datetime
+        def parse_dt(s):
+            if isinstance(s, datetime):
+                return s
+            try:
+                return datetime.strptime(s.strip(), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return datetime.strptime(s.strip()[:10], "%Y-%m-%d")
+
+        dari_dt = parse_dt(dari)
+        ke_dt = parse_dt(ke)
+
+        # Generate list of dates in range
+        dates = []
+        current_date = dari_dt.date()
+        while current_date <= ke_dt.date():
+            dates.append(current_date)
+            current_date += timedelta(days=1)
+
+        # Device configs (same env vars as tracker_worker)
+        in_hijau = [d.strip() for d in os.getenv("IN_DEVICES_HIJAU", "").split(",") if d.strip()]
+        out_hijau = [d.strip() for d in os.getenv("OUT_DEVICES_HIJAU", "").split(",") if d.strip()]
+        in_merah = [d.strip() for d in os.getenv("IN_DEVICES_MERAH", "").split(",") if d.strip()]
+        out_merah = [d.strip() for d in os.getenv("OUT_DEVICES_MERAH", "").split(",") if d.strip()]
+
+        # Helper: parse event_time to datetime
+        def get_event_dt(e):
+            t = e.get("event_time")
+            if isinstance(t, datetime):
+                return t
+            if t:
+                try:
+                    return datetime.strptime(str(t).strip(), "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    return None
+            return None
+
+        def _aggregate_persons(pos1_persons, pos2_persons):
+            """Aggregate per-person results into department summary."""
+            dept_agg = {}
+            totals = {"pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                      "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0}
+
+            for pin, p in pos1_persons.items():
+                dept = p["dept"]
+                if dept not in dept_agg:
+                    dept_agg[dept] = {"pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                                      "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0}
+                dept_agg[dept]["pos1_in"] += p["logical_in"]
+                dept_agg[dept]["pos1_out"] += p["logical_out"]
+                dept_agg[dept]["pos1_cur"] += p["current"]
+                totals["pos1_in"] += p["logical_in"]
+                totals["pos1_out"] += p["logical_out"]
+                totals["pos1_cur"] += p["current"]
+
+            for pin, p in pos2_persons.items():
+                dept = p["dept"]
+                if dept not in dept_agg:
+                    dept_agg[dept] = {"pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                                      "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0}
+                dept_agg[dept]["pos2_in"] += p["logical_in"]
+                dept_agg[dept]["pos2_out"] += p["logical_out"]
+                dept_agg[dept]["pos2_cur"] += p["current"]
+                totals["pos2_in"] += p["logical_in"]
+                totals["pos2_out"] += p["logical_out"]
+                totals["pos2_cur"] += p["current"]
+
+            departments = []
+            for dept_name in sorted(dept_agg.keys()):
+                da = dept_agg[dept_name]
+                departments.append({
+                    "dept": dept_name,
+                    "pos1_in": da["pos1_in"], "pos1_out": da["pos1_out"], "pos1_cur": da["pos1_cur"],
+                    "pos2_in": da["pos2_in"], "pos2_out": da["pos2_out"], "pos2_cur": da["pos2_cur"],
+                })
+            return departments, totals
+
+        # Process each day independently (like zone pages: 2-day window per day)
+        daily_data = []
+        grand_totals = {"pos1_in": 0, "pos1_out": 0, "pos1_cur": 0,
+                        "pos2_in": 0, "pos2_out": 0, "pos2_cur": 0}
+
+        for d in dates:
+            # 2-day window: (d-1) midnight → (d+1) midnight
+            # Same as EventFetcher.fetch_combined_events: yesterday + today
+            window_start = datetime.combine(d - timedelta(days=1), _time.min)
+            window_end = datetime.combine(d + timedelta(days=1), _time.min)
+
+            day_events = []
+            for e in events:
+                edt = get_event_dt(e)
+                if edt and window_start <= edt < window_end:
+                    day_events.append(e)
+
+            pos1_persons = _process_zone_events(day_events, in_hijau, out_hijau)
+            pos2_persons = _process_zone_events(day_events, in_merah, out_merah)
+
+            departments, day_totals = _aggregate_persons(pos1_persons, pos2_persons)
+
+            daily_data.append({
+                "date": str(d),
+                **day_totals,
+                "departments": departments
+            })
+
+            for k in grand_totals:
+                grand_totals[k] += day_totals[k]
+
+        # Grand-total departments across all days (used by Excel single-day export
+        # and as backward-compatible fallback for summary cards)
+        all_pos1 = _process_zone_events(events, in_hijau, out_hijau)
+        all_pos2 = _process_zone_events(events, in_merah, out_merah)
+        all_departments, _ = _aggregate_persons(all_pos1, all_pos2)
+
+        return {
+            **grand_totals,
+            "departments": all_departments,
+            "daily_data": daily_data,
+            "dates": [str(d) for d in dates],
+        }
+
+    @app.route("/api/grafik")
+    def api_grafik():
+        dari = request.args.get("dari", "")
+        ke = request.args.get("ke", "")
+        nama = request.args.get("nama", "")
+        dept = request.args.get("dept", "")
+
+        if not dari or not ke:
+            now = datetime.now()
+            dari = now.strftime("%Y-%m-%d 00:00:00")
+            ke = now.strftime("%Y-%m-%d %H:%M:%S")
+
+        return jsonify(_aggregate_grafik(dari, ke, nama, dept))
+
+    @app.route("/export_grafik")
+    def export_grafik():
+        dari = request.args.get("dari", "")
+        ke = request.args.get("ke", "")
+        nama = request.args.get("nama", "")
+        dept = request.args.get("dept", "")
+
+        if not dari or not ke:
+            return {"error": "Parameter 'dari' dan 'ke' harus diisi."}, 400
+
+        data = _aggregate_grafik(dari, ke, nama, dept)
+        daily_data = data.get("daily_data", [])
+
+        if not daily_data:
+            return {"error": "Data tidak ditemukan dalam rentang waktu tersebut."}, 404
+
+        wb = Workbook()
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        date_fill = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")
+        subtotal_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        border = Border(
+            left=Side(style="thin"), right=Side(style="thin"),
+            top=Side(style="thin"), bottom=Side(style="thin")
+        )
+        multi_day = len(daily_data) > 1
+
+        ws = wb.active
+        ws.title = "Data Per Tanggal" if multi_day else "Data Per Departemen"
+
+        num_cols = 8 if multi_day else 7
+        last_col_letter = get_column_letter(num_cols)
+
+        ws.merge_cells(f"A1:{last_col_letter}1")
+        ws["A1"] = "Grafik Keluar Masuk Per Zona"
+        ws["A1"].font = Font(bold=True, size=14)
+        ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+        ws.merge_cells(f"A2:{last_col_letter}2")
+        filter_info = f"Periode: {dari} s/d {ke}"
+        if nama:
+            filter_info += f" | Nama: {nama}"
+        if dept:
+            filter_info += f" | Departemen: {dept}"
+        ws["A2"] = filter_info
+        ws["A2"].alignment = Alignment(horizontal="center")
+
+        header_row = 4
+        if multi_day:
+            headers = ["TANGGAL", "DEPARTEMEN", "POS 1 MASUK", "POS 1 KELUAR", "POS 1 DI DALAM",
+                       "POS 2 MASUK", "POS 2 KELUAR", "POS 2 DI DALAM"]
+        else:
+            headers = ["DEPARTEMEN", "POS 1 MASUK", "POS 1 KELUAR", "POS 1 DI DALAM",
+                       "POS 2 MASUK", "POS 2 KELUAR", "POS 2 DI DALAM"]
+
+        for col_idx, h in enumerate(headers, 1):
+            cell = ws.cell(row=header_row, column=col_idx, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = align_center
+            cell.border = border
+
+        current_row = header_row + 1
+        data_start_row = current_row
+        gt = {"p1i": 0, "p1o": 0, "p1c": 0, "p2i": 0, "p2o": 0, "p2c": 0}
+
+        if multi_day:
+            for day_entry in daily_data:
+                date_str = day_entry["date"]
+                departments = day_entry.get("departments", [])
+                st = {"p1i": 0, "p1o": 0, "p1c": 0, "p2i": 0, "p2o": 0, "p2c": 0}
+
+                for dept in departments:
+                    values = [
+                        date_str, dept["dept"],
+                        dept["pos1_in"], dept["pos1_out"], dept["pos1_cur"],
+                        dept["pos2_in"], dept["pos2_out"], dept["pos2_cur"],
+                    ]
+                    for col_idx, val in enumerate(values, 1):
+                        cell = ws.cell(row=current_row, column=col_idx, value=val)
+                        cell.alignment = align_center
+                        cell.border = border
+                    st["p1i"] += dept["pos1_in"]
+                    st["p1o"] += dept["pos1_out"]
+                    st["p1c"] += dept["pos1_cur"]
+                    st["p2i"] += dept["pos2_in"]
+                    st["p2o"] += dept["pos2_out"]
+                    st["p2c"] += dept["pos2_cur"]
+                    current_row += 1
+
+                # Subtotal row per date
+                sub_vals = [f"Subtotal {date_str}", "",
+                            st["p1i"], st["p1o"], st["p1c"],
+                            st["p2i"], st["p2o"], st["p2c"]]
+                for col_idx, val in enumerate(sub_vals, 1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=val)
+                    cell.font = Font(bold=True, italic=True)
+                    cell.fill = subtotal_fill
+                    cell.alignment = align_center
+                    cell.border = border
+                current_row += 1
+
+                for k in gt:
+                    gt[k] += st[k]
+
+            # Grand total row
+            grand_vals = ["GRAND TOTAL", "",
+                          gt["p1i"], gt["p1o"], gt["p1c"],
+                          gt["p2i"], gt["p2o"], gt["p2c"]]
+            for col_idx, val in enumerate(grand_vals, 1):
+                cell = ws.cell(row=current_row, column=col_idx, value=val)
+                cell.font = Font(bold=True, size=11)
+                cell.alignment = align_center
+                cell.border = border
+        else:
+            # Single day: same layout as before
+            departments = daily_data[0].get("departments", [])
+            for dept in departments:
+                values = [
+                    dept["dept"],
+                    dept["pos1_in"], dept["pos1_out"], dept["pos1_cur"],
+                    dept["pos2_in"], dept["pos2_out"], dept["pos2_cur"],
+                ]
+                for col_idx, val in enumerate(values, 1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=val)
+                    cell.alignment = align_center
+                    cell.border = border
+                gt["p1i"] += dept["pos1_in"]
+                gt["p1o"] += dept["pos1_out"]
+                gt["p1c"] += dept["pos1_cur"]
+                gt["p2i"] += dept["pos2_in"]
+                gt["p2o"] += dept["pos2_out"]
+                gt["p2c"] += dept["pos2_cur"]
+                current_row += 1
+
+            total_vals = ["TOTAL",
+                          gt["p1i"], gt["p1o"], gt["p1c"],
+                          gt["p2i"], gt["p2o"], gt["p2c"]]
+            for col_idx, val in enumerate(total_vals, 1):
+                cell = ws.cell(row=current_row, column=col_idx, value=val)
+                cell.font = Font(bold=True)
+                cell.alignment = align_center
+                cell.border = border
+
+        total_row = current_row
+
+        for col_idx in range(1, num_cols + 1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 20
+
+        # Chart
+        if multi_day:
+            # Per-date summary chart (Sheet 2)
+            ws2 = wb.create_sheet("Grafik Per Tanggal")
+            ws2.cell(row=1, column=1, value="TANGGAL")
+            chart_headers = ["POS 1 MASUK", "POS 1 KELUAR", "POS 1 DI DALAM",
+                             "POS 2 MASUK", "POS 2 KELUAR", "POS 2 DI DALAM"]
+            for ci, ch in enumerate(chart_headers, 2):
+                ws2.cell(row=1, column=ci, value=ch)
+
+            for ri, day_entry in enumerate(daily_data, 2):
+                ws2.cell(row=ri, column=1, value=day_entry["date"])
+                ws2.cell(row=ri, column=2, value=day_entry["pos1_in"])
+                ws2.cell(row=ri, column=3, value=day_entry["pos1_out"])
+                ws2.cell(row=ri, column=4, value=day_entry["pos1_cur"])
+                ws2.cell(row=ri, column=5, value=day_entry["pos2_in"])
+                ws2.cell(row=ri, column=6, value=day_entry["pos2_out"])
+                ws2.cell(row=ri, column=7, value=day_entry["pos2_cur"])
+
+            chart = BarChart()
+            chart.type = "col"
+            chart.grouping = "clustered"
+            chart.title = "Data Per Tanggal"
+            chart.y_axis.title = "Jumlah Orang"
+            chart.x_axis.title = "Tanggal"
+            chart.width = 30
+            chart.height = 14
+
+            last_data_row = 1 + len(daily_data)
+            chart_data_ref = Reference(ws2, min_col=2, min_row=1, max_col=7, max_row=last_data_row)
+            cats_ref = Reference(ws2, min_col=1, min_row=2, max_row=last_data_row)
+            chart.add_data(chart_data_ref, titles_from_data=True)
+            chart.set_categories(cats_ref)
+
+            chart_colors = ["28A745", "6C757D", "0D6EFD", "DC3545", "FD7E14", "0DCAF0"]
+            for idx, color in enumerate(chart_colors):
+                if idx < len(chart.series):
+                    chart.series[idx].graphicalProperties.solidFill = color
+
+            ws2.add_chart(chart, "A" + str(last_data_row + 2))
+        else:
+            # Single day: department chart on same sheet
+            data_end_row = total_row - 1
+            if data_end_row >= data_start_row:
+                chart = BarChart()
+                chart.type = "col"
+                chart.grouping = "clustered"
+                chart.title = "Data Per Departemen"
+                chart.y_axis.title = "Jumlah Orang"
+                chart.x_axis.title = "Departemen"
+                chart.width = 30
+                chart.height = 14
+
+                chart_data_ref = Reference(ws, min_col=2, min_row=header_row, max_col=7, max_row=data_end_row)
+                cats_ref = Reference(ws, min_col=1, min_row=data_start_row, max_row=data_end_row)
+                chart.add_data(chart_data_ref, titles_from_data=True)
+                chart.set_categories(cats_ref)
+
+                chart_colors = ["28A745", "6C757D", "0D6EFD", "DC3545", "FD7E14", "0DCAF0"]
+                for idx, color in enumerate(chart_colors):
+                    if idx < len(chart.series):
+                        chart.series[idx].graphicalProperties.solidFill = color
+
+                ws.add_chart(chart, f"A{total_row + 2}")
+
+        logger.info(f"Export grafik oleh {request.remote_addr}: {dari} - {ke}, {len(daily_data)} hari")
+
+        virtual_file = io.BytesIO()
+        try:
+            wb.save(virtual_file)
+        except Exception as e:
+            logger.error(f"Gagal menyimpan file Excel grafik: {e}")
+            return {"error": "Gagal menyimpan file."}, 500
+
+        virtual_file.seek(0)
+        file_name = f"grafik_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(
+            virtual_file,
+            as_attachment=True,
+            download_name=file_name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     @app.route("/search_person")
     def search_person():
