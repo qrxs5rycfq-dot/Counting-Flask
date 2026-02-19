@@ -193,17 +193,25 @@
 
           <!-- Filter Form -->
           <form id="filter-form" class="row g-3 align-items-end mb-4">
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Dari</label>
               <input type="text" id="dari" name="dari" class="form-control">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Sampai</label>
               <input type="text" id="ke" name="ke" class="form-control">
             </div>
-            <div class="col-md-4 text-end">
+            <div class="col-md-2">
+              <label class="form-label">Nama</label>
+              <input type="text" id="filter-nama" name="nama" class="form-control" placeholder="Cari nama...">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Departemen</label>
+              <input type="text" id="filter-dept" name="dept" class="form-control" placeholder="Cari departemen...">
+            </div>
+            <div class="col-md-2 text-end">
               <button type="submit" class="btn btn-primary">📊 Tampilkan</button>
-              <a href="#" id="btn-export" class="btn btn-success ms-2">⬇️ Export Excel</a>
+              <a href="#" id="btn-export" class="btn btn-success ms-2">⬇️ Export</a>
             </div>
           </form>
 
@@ -330,6 +338,8 @@
   function loadGrafik() {
     const dari = document.getElementById('dari').value;
     const ke = document.getElementById('ke').value;
+    const nama = document.getElementById('filter-nama').value.trim();
+    const dept = document.getElementById('filter-dept').value.trim();
 
     if (!dari || !ke) {
       alert('Silakan pilih tanggal.');
@@ -339,6 +349,8 @@
     const params = new URLSearchParams();
     params.set('dari', formatToSQLDatetime(dari));
     params.set('ke', formatToSQLDatetime(ke));
+    if (nama) params.set('nama', nama);
+    if (dept) params.set('dept', dept);
 
     const deptBody = document.getElementById('dept-body');
     deptBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Memuat data...</td></tr>';
@@ -622,6 +634,8 @@
 
     const dari = document.getElementById('dari').value;
     const ke = document.getElementById('ke').value;
+    const nama = document.getElementById('filter-nama').value.trim();
+    const dept = document.getElementById('filter-dept').value.trim();
 
     if (!dari || !ke) {
       alert('Silakan pilih tanggal terlebih dahulu.');
@@ -633,6 +647,8 @@
     const params = new URLSearchParams();
     params.set('dari', formatToSQLDatetime(dari));
     params.set('ke', formatToSQLDatetime(ke));
+    if (nama) params.set('nama', nama);
+    if (dept) params.set('dept', dept);
 
     fetch(`/export_grafik?${params.toString()}`)
       .then(response => {

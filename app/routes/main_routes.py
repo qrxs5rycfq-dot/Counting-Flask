@@ -572,11 +572,12 @@ def register_routes(app):
 
         return result
 
-    def _aggregate_grafik(dari, ke):
+    def _aggregate_grafik(dari, ke, nama_filter="", dept_filter=""):
         """
         Aggregate entry/exit/current data per department and zone.
         Processes events day-by-day (each day uses a 2-day window like zone pages).
         Returns per-day breakdown in daily_data[] and grand totals.
+        Optionally filters events by name and/or department (case-insensitive partial match).
         """
         from datetime import timedelta, time as _time, date as _date
 
@@ -592,6 +593,24 @@ def register_routes(app):
         except Exception as e:
             logger.error(f"Gagal mengambil data grafik: {e}")
             return empty
+
+        if not events:
+            return empty
+
+        # Apply name/department filters (case-insensitive partial match)
+        nama_q = nama_filter.strip().lower()
+        dept_q = dept_filter.strip().lower()
+        if nama_q or dept_q:
+            filtered = []
+            for e in events:
+                ename = (e.get("name") or "").strip().lower()
+                edept = (e.get("dept_name") or "").strip().lower()
+                if nama_q and nama_q not in ename:
+                    continue
+                if dept_q and dept_q not in edept:
+                    continue
+                filtered.append(e)
+            events = filtered
 
         if not events:
             return empty
@@ -721,23 +740,27 @@ def register_routes(app):
     def api_grafik():
         dari = request.args.get("dari", "")
         ke = request.args.get("ke", "")
+        nama = request.args.get("nama", "")
+        dept = request.args.get("dept", "")
 
         if not dari or not ke:
             now = datetime.now()
             dari = now.strftime("%Y-%m-%d 00:00:00")
             ke = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        return jsonify(_aggregate_grafik(dari, ke))
+        return jsonify(_aggregate_grafik(dari, ke, nama, dept))
 
     @app.route("/export_grafik")
     def export_grafik():
         dari = request.args.get("dari", "")
         ke = request.args.get("ke", "")
+        nama = request.args.get("nama", "")
+        dept = request.args.get("dept", "")
 
         if not dari or not ke:
             return {"error": "Parameter 'dari' dan 'ke' harus diisi."}, 400
 
-        data = _aggregate_grafik(dari, ke)
+        data = _aggregate_grafik(dari, ke, nama, dept)
         daily_data = data.get("daily_data", [])
 
         if not daily_data:
@@ -767,7 +790,12 @@ def register_routes(app):
         ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
         ws.merge_cells(f"A2:{last_col_letter}2")
-        ws["A2"] = f"Periode: {dari} s/d {ke}"
+        filter_info = f"Periode: {dari} s/d {ke}"
+        if nama:
+            filter_info += f" | Nama: {nama}"
+        if dept:
+            filter_info += f" | Departemen: {dept}"
+        ws["A2"] = filter_info
         ws["A2"].alignment = Alignment(horizontal="center")
 
         header_row = 4
